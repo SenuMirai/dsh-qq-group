@@ -1,0 +1,6 @@
+node_modules/
+lib/*.map
+*.log
+.env
+.env.*
+.DS_Store
