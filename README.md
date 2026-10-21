@@ -32,7 +32,7 @@ A standalone QQ group-chat plugin for [DeepSeek Harness](https://github.com/deep
 ### 部署要求
 
 - **DeepSeek Harness** 桌面版或可加载插件的主机
-- **Node.js 20+**、**pnpm 9+**
+- **Node.js 22.12+**、**pnpm 9+**
 - **NapCatQQ** + **QQ NT**（Windows 推荐；Linux 可用 NapCat Docker，需自行确认 QQ 登录）
 - 一个 QQ 小号作为机器人，已加入目标群
 - 可选：视觉模型（识图）、edge-tts（语音，联网）、ffmpeg（部分音频转换）
@@ -216,7 +216,7 @@ MIT，© 2026 SenuMirai。见 [LICENSE](./LICENSE)。
 ### Requirements
 
 - **DeepSeek Harness** desktop or a host that can load plugins
-- **Node.js 20+**, **pnpm 9+**
+- **Node.js 22.12+**, **pnpm 9+**
 - **NapCatQQ** + **QQ NT** (Windows recommended; NapCat Docker on Linux is possible, confirm QQ login yourself)
 - A spare QQ account for the bot, already in the target group
 - Optional: a vision model, edge-tts (network), ffmpeg for some audio conversions
