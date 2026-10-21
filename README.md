@@ -174,7 +174,7 @@ DSH 设置 →「QQ 群聊」→「连接」：
 - [NapNeko/NapCatQQ](https://github.com/NapNeko/NapCatQQ)：QQ NT 的 OneBot 实现；
 - [OneBot 11](https://github.com/botuniverse/onebot-11)：协议标准；
 - [rany2/edge-tts](https://github.com/rany2/edge-tts)：免费、无需显卡的语音合成；
-- [sdfsfsk/matsuko_cover](https://github.com/sdfsfsk/matsuko_cover) 与 dsh-cover-pipeline：唱歌/翻唱链路的灵感来源；
+- [sdfsfsk/matsuko_cover](https://github.com/sdfsfsk/matsuko_cover) 与 [dsh-cover-pipeline](https://github.com/InariNGT-Ofiicial/dsh-cover-pipeline)：唱歌/翻唱链路的灵感来源；
 - [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)：插件宿主、模型、附件与设置系统。
 
 以上项目各自遵循其原许可证；本项目只借鉴设计思路，不复制其受限素材。
@@ -358,7 +358,7 @@ Design ideas were informed by:
 - [NapNeko/NapCatQQ](https://github.com/NapNeko/NapCatQQ): OneBot implementation for QQ NT.
 - [OneBot 11](https://github.com/botuniverse/onebot-11): protocol standard.
 - [rany2/edge-tts](https://github.com/rany2/edge-tts): free, GPU-less speech synthesis.
-- [sdfsfsk/matsuko_cover](https://github.com/sdfsfsk/matsuko_cover) and dsh-cover-pipeline: inspiration for the singing/cover pipeline.
+- [sdfsfsk/matsuko_cover](https://github.com/sdfsfsk/matsuko_cover) and [dsh-cover-pipeline](https://github.com/InariNGT-Ofiicial/dsh-cover-pipeline): inspiration for the singing/cover pipeline.
 - [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): plugin host, models, attachments, settings.
 
 Each project keeps its own license; this project borrows design ideas only and does not copy restricted assets.
