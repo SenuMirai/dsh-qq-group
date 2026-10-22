@@ -1303,11 +1303,29 @@ export function apply(ctx: any): void {
         }
         if (method !== 'POST') return send(405, { error: 'method not allowed' });
         const payload = JSON.parse(body || 'null') as
-          | { action?: unknown; groupId?: unknown; keyMemories?: unknown }
+          | {
+              action?: unknown;
+              groupId?: unknown;
+              keyMemories?: unknown;
+              text?: unknown;
+              category?: unknown;
+              importance?: unknown;
+              factKey?: unknown;
+              id?: unknown;
+            }
           | null;
         const groupId = typeof payload?.groupId === 'string' ? payload.groupId : urlGroup;
         if (payload?.action === 'set') {
           return send(200, await qqHost.memory('set', groupId, payload.keyMemories));
+        }
+        if (payload?.action === 'v3add') {
+          return send(200, await qqHost.memory('v3add', groupId, payload));
+        }
+        if (payload?.action === 'v3update') {
+          return send(200, await qqHost.memory('v3update', groupId, payload));
+        }
+        if (payload?.action === 'v3delete') {
+          return send(200, await qqHost.memory('v3delete', groupId, payload));
         }
         if (payload?.action === 'compress') {
           return send(200, await qqHost.memory('compress', groupId));

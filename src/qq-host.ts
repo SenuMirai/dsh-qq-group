@@ -70,7 +70,7 @@ export interface QqHost {
   handle(rest: string, method: string, body: string | undefined): Promise<unknown | null>;
   /** 记忆面板：读/写关键记忆/立即压缩 */
   memory(
-    action: 'get' | 'set' | 'compress',
+    action: 'get' | 'set' | 'compress' | 'v3add' | 'v3update' | 'v3delete',
     groupId: string,
     payload?: unknown,
   ): Promise<Record<string, unknown>>;
@@ -242,7 +242,7 @@ export function createQqHost(deps: QqHostDeps): QqHost {
 
     /** 记忆面板的读/写/压缩（桥未启动时明确失败） */
     async memory(
-      action: 'get' | 'set' | 'compress',
+      action: 'get' | 'set' | 'compress' | 'v3add' | 'v3update' | 'v3delete',
       groupId: string,
       payload?: unknown,
     ): Promise<Record<string, unknown>> {
@@ -253,6 +253,15 @@ export function createQqHost(deps: QqHostDeps): QqHost {
         if (action === 'set') {
           const keyMemories = bridge.setKeyMemories(groupId, payload);
           return { ok: true, keyMemories };
+        }
+        if (action === 'v3add') return bridge.addMemoryV3(groupId, payload);
+        if (action === 'v3update') {
+          const patch = (payload !== null && typeof payload === 'object' ? payload : {}) as { id?: unknown };
+          return bridge.updateMemoryV3(groupId, typeof patch.id === 'string' ? patch.id : '', payload);
+        }
+        if (action === 'v3delete') {
+          const patch = (payload !== null && typeof payload === 'object' ? payload : {}) as { id?: unknown };
+          return bridge.deleteMemoryV3(groupId, typeof patch.id === 'string' ? patch.id : '');
         }
         return { ok: true, ...(await bridge.compressMemoryNow(groupId)) };
       } catch (e) {

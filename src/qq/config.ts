@@ -77,6 +77,14 @@ export interface GroupPolicy {
   compressEveryTurns: number;
   /** 关键记忆条数上限 */
   keyMemoryMax: number;
+  /** 启用记忆 v3（证据召回/淡忘）；关掉则退回旧 keyMemories 注入 */
+  memoryV3Enabled: boolean;
+  /** 每多少轮尝试提炼一次 v3 记忆（0 = 只在压缩时写） */
+  memoryV3ExtractEveryTurns: number;
+  /** v3 一次注入条数/字数/证据门槛 */
+  memoryV3MaxItems: number;
+  memoryV3MaxChars: number;
+  memoryV3Threshold: number;
   /** 压缩掉的原文是否归档 */
   archiveEnabled: boolean;
   /** 文件读取总开关：off / all / custom */
@@ -280,6 +288,11 @@ export function defaultGroupPolicy(): GroupPolicy {
     compressMode: 'hybrid',
     compressEveryTurns: 40,
     keyMemoryMax: 50,
+    memoryV3Enabled: true,
+    memoryV3ExtractEveryTurns: 12,
+    memoryV3MaxItems: 6,
+    memoryV3MaxChars: 800,
+    memoryV3Threshold: 0.35,
     archiveEnabled: true,
     fileReadMode: 'custom',
     fileReadModes: ['at', 'question'],
@@ -532,6 +545,13 @@ export function normalizeGroupPolicy(raw: unknown, path: string, base = defaultG
       num(src.compressEveryTurns, `${path}.compressEveryTurns`, base.compressEveryTurns, 5, 200),
     ),
     keyMemoryMax: Math.round(num(src.keyMemoryMax, `${path}.keyMemoryMax`, base.keyMemoryMax, 0, 500)),
+    memoryV3Enabled: src.memoryV3Enabled !== false,
+    memoryV3ExtractEveryTurns: Math.round(
+      num(src.memoryV3ExtractEveryTurns, `${path}.memoryV3ExtractEveryTurns`, base.memoryV3ExtractEveryTurns, 0, 200),
+    ),
+    memoryV3MaxItems: Math.round(num(src.memoryV3MaxItems, `${path}.memoryV3MaxItems`, base.memoryV3MaxItems, 1, 20)),
+    memoryV3MaxChars: Math.round(num(src.memoryV3MaxChars, `${path}.memoryV3MaxChars`, base.memoryV3MaxChars, 100, 4000)),
+    memoryV3Threshold: num(src.memoryV3Threshold, `${path}.memoryV3Threshold`, base.memoryV3Threshold, 0, 1),
     archiveEnabled: src.archiveEnabled !== false,
     fileReadMode: enumOf<'off' | 'all' | 'custom'>(
       src.fileReadMode,

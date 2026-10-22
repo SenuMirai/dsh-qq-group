@@ -201,6 +201,17 @@ DSH 设置 →「QQ 群聊」→「连接」：
 
 
 
+
+
+### v1.5.0 记忆 v3
+
+- 新增 memory-v3 数据层：鲜活度、重要度、情绪、事实键、来源。
+- 普通事件会淡忘，长期事实不衰减；同一 factKey 只保留最新。
+- 按证据稀有度召回，最多 6 条 / 800 字 / 长期事实 2 条（可调）。
+- 旧 qq-memory.json 保留并迁移；新增 memory-v3.json。
+- 每 12 轮（可调）自动提炼 1~2 条记忆，压缩时也写入。
+- 记忆页支持 v3 条目新增/编辑/删除、召回统计。
+
 ### v1.4.0 鲸鱼娘自拍照与隐式看图
 
 - 在「表情包」页内新增 **鲸鱼娘自拍照** 库，独立于普通表情包；支持上传/删除/打开文件夹。
@@ -456,6 +467,17 @@ Each project keeps its own license; this project borrows design ideas only and d
 
 
 
+
+
+
+### v1.5.0 memory v3
+
+- New memory-v3 layer: freshness, importance, emotion, fact keys, source.
+- Events decay; stable facts do not. The latest item wins per fact key.
+- Evidence-based recall, max 6 items / 800 chars / 2 facts (configurable).
+- Legacy qq-memory.json is kept and migrated into memory-v3.json.
+- Every 12 turns (configurable) extracts 1–2 memories; compression also writes.
+- Memory page supports add/edit/delete and recall stats.
 
 ### v1.4.0 selfie library and implicit visual intents
 

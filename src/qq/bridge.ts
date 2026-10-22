@@ -45,6 +45,20 @@ import {
   writeMemoryFile,
   type KeyMemory,
 } from './memory';
+import {
+  deleteMemory,
+  emptyMemoryStore,
+  formatMemories,
+  listMemories,
+  memoryStats,
+  migrateLegacyMemories,
+  readMemoryStore,
+  recallMemories,
+  rememberMemory,
+  updateMemory,
+  writeMemoryStore,
+  type MemoryStoreV3,
+} from './memory-v3';
 import { OneBotClient, asId, parseMessage } from './onebot';
 import {
   CHAT_DEBOUNCE_MS,
@@ -211,12 +225,16 @@ export class QqBridge {
   private readonly stats = new Map<string, RuntimeStats>();
   private memory = readMemoryFile('').memory;
   private memoryPath = '';
+  private memoryV3: MemoryStoreV3 = emptyMemoryStore();
+  private memoryV3Path = '';
   private timer: ReturnType<typeof setTimeout> | undefined;
   private running = false;
   /** 正在处理中的群（同一个群不并发回复） */
   private readonly busy = new Set<string>();
   /** 正在压缩记忆的群 */
   private readonly compressing = new Set<string>();
+  private readonly memoryV3Extracting = new Set<string>();
+  private readonly memoryV3ExtractedAt = new Map<string, number>();
   /** 每群每天读取文件计数 */
   private readonly fileReadDays = new Map<string, { day: string; count: number }>();
   /** 正在生成时收到的 @/引用消息：排队，不丢 */
@@ -263,6 +281,9 @@ export class QqBridge {
       turns: group.turns.length,
       summary: group.summary ?? '',
       keyMemories: group.keyMemories,
+      memoryV3: memoryStats(this.memoryV3, groupId),
+      memoryV3Items: listMemories(this.memoryV3, groupId).slice(0, 200),
+      lastRecall: this.memoryV3.groups[groupId]?.lastRecall ?? null,
       estimatedTokens: estimateTokens(group.turns.map((turn) => turn.text).join('\n')),
       limits: {
         contextTurns: policy.contextTurns,
@@ -285,6 +306,72 @@ export class QqBridge {
     group.updatedAt = Date.now();
     this.persistMemory();
     return group.keyMemories;
+  }
+
+  /** 手动新增一条记忆 v3 */
+  addMemoryV3(groupId: string, raw: unknown): Record<string, unknown> {
+    const input = (raw !== null && typeof raw === 'object' ? raw : {}) as {
+      text?: unknown;
+      category?: unknown;
+      importance?: unknown;
+      factKey?: unknown;
+    };
+    const text = typeof input.text === 'string' ? input.text.trim() : '';
+    if (text === '') return { ok: false, message: '记忆内容为空' };
+    const category =
+      input.category === 'stable_profile' ||
+      input.category === 'preference' ||
+      input.category === 'relationship' ||
+      input.category === 'inside_joke' ||
+      input.category === 'event'
+        ? input.category
+        : 'stable_profile';
+    const result = rememberMemory(this.memoryV3, groupId, {
+      text,
+      category,
+      importance:
+        typeof input.importance === 'number' ? Math.max(0, Math.min(1, input.importance)) : 0.8,
+      ...(typeof input.factKey === 'string' && input.factKey.trim() !== ''
+        ? { factKey: input.factKey.trim() }
+        : {}),
+      source: 'manual',
+    });
+    if (result.ok) this.persistMemoryV3();
+    return result.ok ? { ok: true, item: result.item } : { ok: false, message: result.reason ?? '写入失败' };
+  }
+
+  /** 修改一条记忆 v3 */
+  updateMemoryV3(groupId: string, id: string, raw: unknown): Record<string, unknown> {
+    const patch = (raw !== null && typeof raw === 'object' ? raw : {}) as {
+      text?: unknown;
+      category?: unknown;
+      importance?: unknown;
+      factKey?: unknown;
+    };
+    const category =
+      patch.category === 'event' ||
+      patch.category === 'stable_profile' ||
+      patch.category === 'preference' ||
+      patch.category === 'relationship' ||
+      patch.category === 'inside_joke'
+        ? patch.category
+        : undefined;
+    const item = updateMemory(this.memoryV3, groupId, id, {
+      ...(typeof patch.text === 'string' ? { text: patch.text } : {}),
+      ...(category === undefined ? {} : { category }),
+      ...(typeof patch.importance === 'number' ? { importance: patch.importance } : {}),
+      ...(typeof patch.factKey === 'string' ? { factKey: patch.factKey } : {}),
+    });
+    if (item === undefined) return { ok: false, message: '记忆不存在' };
+    this.persistMemoryV3();
+    return { ok: true, item };
+  }
+
+  /** 删除一条记忆 v3 */
+  deleteMemoryV3(groupId: string, id: string): Record<string, unknown> {
+    const ok = deleteMemory(this.memoryV3, groupId, id);
+    if (ok) this.persistMemoryV3();
+    return ok ? { ok: true } : { ok: false, message: '记忆不存在' };
   }
 
   /** 手动立即压缩（可能调模型） */
@@ -345,6 +432,32 @@ export class QqBridge {
     const loaded = readMemoryFile(this.memoryPath);
     this.memory = loaded.memory;
     if (loaded.problem !== undefined) this.log('warn', loaded.problem);
+
+    this.memoryV3Path = join(this.deps.userRoot, 'memory-v3.json');
+    this.memoryV3 = readMemoryStore(this.memoryV3Path);
+    let migrated = 0;
+    for (const [groupId, group] of Object.entries(this.memory.groups)) {
+      if ((this.memoryV3.groups[groupId]?.items.length ?? 0) > 0) continue;
+      migrated += migrateLegacyMemories(
+        this.memoryV3,
+        groupId,
+        group.keyMemories.map((item) => ({
+          text: item.text,
+          kind: item.kind,
+          confidence: item.confidence,
+          createdAt: item.createdAt,
+        })),
+        group.summary,
+      );
+    }
+    if (migrated > 0) {
+      try {
+        writeMemoryStore(this.memoryV3Path, this.memoryV3);
+        this.log('info', `记忆 v3 迁移：${migrated} 条`);
+      } catch (e) {
+        this.log('warn', `记忆 v3 迁移落盘失败：${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
     this.seedGroupStates();
 
     this.speaker = new Speaker({
@@ -1084,13 +1197,30 @@ export class QqBridge {
         group.summary === undefined || group.summary === ''
           ? ''
           : `\n\n【更早的群聊摘要（已压缩）】${group.summary}`;
+      const recallQuery = [
+        message?.text ?? '',
+        transcript(recentTurns(group, 4), this.config.selfName, Date.now()),
+      ].join('\n');
+      const recalled =
+        policy.memoryV3Enabled === false
+          ? { selected: [], rejected: [], chars: 0, evidence: 0 }
+          : recallMemories(this.memoryV3, groupId, recallQuery, {
+              maxItems: policy.memoryV3MaxItems,
+              maxChars: policy.memoryV3MaxChars,
+              maxFacts: 2,
+              threshold: policy.memoryV3Threshold,
+            });
+      if (recalled.selected.length > 0) this.persistMemoryV3();
+      const recalledText = formatMemories(recalled.selected);
       const keyMemoryNote =
-        group.keyMemories.length === 0
-          ? ''
-          : `\n\n【长期关键记忆（只作背景，不要逐条复述）】\n${group.keyMemories
-              .slice(0, 30)
-              .map((item) => `- [${item.kind}] ${item.text}`)
-              .join('\n')}`;
+        recalledText !== ''
+          ? `\n\n【相关长期记忆（自动召回；只作背景，不要逐条复述）】\n${recalledText}`
+          : group.keyMemories.length === 0
+            ? ''
+            : `\n\n【长期关键记忆（只作背景，不要逐条复述）】\n${group.keyMemories
+                .slice(0, 30)
+                .map((item) => `- [${item.kind}] ${item.text}`)
+                .join('\n')}`;
       const fileNote = this.shouldReadFiles(groupId, policy, message, mode)
         ? await this.readFileContext(groupId, policy, message)
         : '';
@@ -1244,6 +1374,9 @@ export class QqBridge {
         if (repliedUserId !== '') this.deps.profiles?.noteReply(groupId, repliedUserId);
         if (mode === 'proactive') {
           this.log('info', `群 ${groupId} 主动开口（第 ${state.ignoredProactive} 次之后，下次窗口 ${Math.round(((state.nextProactiveAt ?? 0) - Date.now()) / 60000)} 分钟）`);
+        }
+        if (mode !== 'proactive' && message !== undefined) {
+          void this.maybeExtractMemoryV3(groupId, message.text, plan.messages.join(' / '));
         }
       }
     } catch (e) {
@@ -1639,6 +1772,15 @@ export class QqBridge {
   }
 
   /** 记忆落盘（失败只记日志，不影响对话） */
+  private persistMemoryV3(): void {
+    if (this.memoryV3Path === '') return;
+    try {
+      writeMemoryStore(this.memoryV3Path, this.memoryV3);
+    } catch (e) {
+      this.log('warn', `写记忆 v3 失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   private persistMemory(): void {
     if (this.memoryPath === '') return;
     try {
@@ -1663,6 +1805,97 @@ export class QqBridge {
     void this.maybeCompressMemory(groupId).catch((e) => {
       this.log('warn', `压缩记忆失败：${e instanceof Error ? e.message : String(e)}`);
     });
+  }
+
+  /**
+   * 记忆 v3 的日常提炼：每 N 轮最多一次，只提炼 1~2 条长期有用的事。
+   * 不阻塞回复；失败只写日志，不影响聊天。
+   */
+  private async maybeExtractMemoryV3(groupId: string, userText: string, replyText: string): Promise<void> {
+    const policy = this.policyOf(groupId);
+    if (policy.memoryV3Enabled === false || policy.memoryV3ExtractEveryTurns <= 0) return;
+    if (this.llm === undefined || this.memoryV3Extracting.has(groupId)) return;
+    const group = groupMemory(this.memory, groupId);
+    const last = this.memoryV3ExtractedAt.get(groupId) ?? 0;
+    if (group.turns.length - last < policy.memoryV3ExtractEveryTurns) return;
+    this.memoryV3ExtractedAt.set(groupId, group.turns.length);
+    this.memoryV3Extracting.add(groupId);
+    try {
+      const context = transcript(recentTurns(group, 12), this.config.selfName, Date.now());
+      const system = [
+        '你在从 QQ 群聊里提炼长期记忆。只输出 JSON，不要解释。',
+        '{"memories":[{"text":"一条长期有用的记忆","category":"event|stable_profile|preference|relationship|inside_joke","importance":0.6,"factKey":"可选：对象.方面，不写值","occurredAt":"可选：YYYY-MM-DD"}]}',
+        '只记长期有价值的事：约定、偏好、关系、重要事件、梗；最多 2 条，没有就空数组。',
+        '不要记日常流水、天气、吃了什么；不要记重复内容；不要记隐私/账号/密码/住址；不要编造。',
+        '一条只讲一件事；事实键只给“会变的那一个值”，写 owner.身高，不写 owner.身高170；拿不准留空。',
+      ].join('\n');
+      const user = [
+        `最近群聊：\n${context}`,
+        `\n这一轮：\n用户：${userText.slice(0, 800)}\n她：${replyText.slice(0, 800)}`,
+      ].join('\n');
+      const result = await this.llm.chat(
+        [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+        { json: true, timeoutMs: 30_000, purpose: 'memory-v3' },
+      );
+      if (!result.ok) return;
+      const match = /\{[\s\S]*\}/.exec(result.text);
+      if (match === null) return;
+      let parsed: { memories?: unknown };
+      try {
+        parsed = JSON.parse(match[0]) as { memories?: unknown };
+      } catch {
+        return;
+      }
+      if (!Array.isArray(parsed.memories)) return;
+      let added = 0;
+      for (const value of parsed.memories.slice(0, 2)) {
+        if (value === null || typeof value !== 'object') continue;
+        const item = value as {
+          text?: unknown;
+          category?: unknown;
+          importance?: unknown;
+          factKey?: unknown;
+          occurredAt?: unknown;
+        };
+        const text = typeof item.text === 'string' ? item.text.trim().slice(0, 300) : '';
+        if (text === '') continue;
+        const category =
+          item.category === 'stable_profile' ||
+          item.category === 'preference' ||
+          item.category === 'relationship' ||
+          item.category === 'inside_joke' ||
+          item.category === 'event'
+            ? item.category
+            : 'event';
+        const occurredMs =
+          typeof item.occurredAt === 'string' && item.occurredAt.trim() !== ''
+            ? Date.parse(item.occurredAt)
+            : Number.NaN;
+        const saved = rememberMemory(this.memoryV3, groupId, {
+          text,
+          category,
+          importance:
+            typeof item.importance === 'number' ? Math.max(0, Math.min(1, item.importance)) : 0.6,
+          ...(typeof item.factKey === 'string' && item.factKey.trim() !== ''
+            ? { factKey: item.factKey.trim().slice(0, 80) }
+            : {}),
+          ...(Number.isFinite(occurredMs) ? { occurredAt: occurredMs } : {}),
+          source: 'chat',
+        });
+        if (saved.ok) added += 1;
+      }
+      if (added > 0) {
+        this.persistMemoryV3();
+        this.log('info', `群 ${groupId} 提炼了 ${added} 条记忆 v3`);
+      }
+    } catch (e) {
+      this.log('warn', `记忆 v3 提炼失败：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      this.memoryV3Extracting.delete(groupId);
+    }
   }
 
   /** 把她说的话记进上下文 */
@@ -1703,13 +1936,22 @@ export class QqBridge {
       .join('；');
     let summary = extractive;
     let incoming: KeyMemory[] = [];
+    let v3Incoming: Array<{
+      text: string;
+      category: 'event' | 'stable_profile' | 'preference' | 'relationship' | 'inside_joke';
+      importance: number;
+      factKey?: string;
+      occurredAt?: number;
+    }> = [];
     this.compressing.add(groupId);
     try {
       if (policy.compressMode !== 'extractive' && this.llm !== undefined) {
         const system = [
           '你在整理 QQ 群聊的长期记忆。只输出 JSON，不要解释。',
-          '{"summary":"压缩摘要","keyMemories":[{"kind":"fact|preference|relationship|inside_joke","text":"一条长期有用的记忆","confidence":0.8}]}',
+          '{"summary":"压缩摘要","keyMemories":[{"kind":"fact|preference|relationship|inside_joke","category":"event|stable_profile|preference|relationship|inside_joke","text":"一条长期有用的记忆","importance":0.6,"confidence":0.8,"factKey":"可选：对象.方面，不写值","occurredAt":"可选：YYYY-MM-DD"}]}',
           `摘要不超过 ${policy.summaryMaxChars} 字；只记录长期有用的事实、偏好、关系、约定或梗；`,
+          '一条只讲一件事；不要记日常流水（吃了什么、天气）、不要记重复的事；',
+          '事实键只给“会变的那一个值”，写 owner.身高，不写 owner.身高170；拿不准留空；',
           '不要记录隐私、账号、密码、住址、聊天原文；不要编造；没有值得记的就给空数组。',
         ].join('\n');
         const result = await this.llm.chat(
@@ -1731,13 +1973,50 @@ export class QqBridge {
                 incoming = parsed.keyMemories
                   .map((value, index) => {
                     if (value === null || typeof value !== 'object') return undefined;
-                    const item = value as { kind?: unknown; text?: unknown; confidence?: unknown };
+                    const item = value as {
+                      kind?: unknown;
+                      category?: unknown;
+                      text?: unknown;
+                      confidence?: unknown;
+                      importance?: unknown;
+                      factKey?: unknown;
+                      occurredAt?: unknown;
+                    };
                     const memoryText = typeof item.text === 'string' ? item.text.trim().slice(0, 160) : '';
                     if (memoryText === '') return undefined;
                     const kind =
                       item.kind === 'preference' || item.kind === 'relationship' || item.kind === 'inside_joke'
                         ? item.kind
                         : 'fact';
+                    const category =
+                      item.category === 'event' ||
+                      item.category === 'stable_profile' ||
+                      item.category === 'preference' ||
+                      item.category === 'relationship' ||
+                      item.category === 'inside_joke'
+                        ? item.category
+                        : kind === 'fact'
+                          ? 'stable_profile'
+                          : kind;
+                    const importance =
+                      typeof item.importance === 'number'
+                        ? Math.max(0, Math.min(1, item.importance))
+                        : typeof item.confidence === 'number'
+                          ? Math.max(0, Math.min(1, item.confidence))
+                          : 0.6;
+                    const occurredMs =
+                      typeof item.occurredAt === 'string' && item.occurredAt.trim() !== ''
+                        ? Date.parse(item.occurredAt)
+                        : Number.NaN;
+                    v3Incoming.push({
+                      text: memoryText,
+                      category,
+                      importance,
+                      ...(typeof item.factKey === 'string' && item.factKey.trim() !== ''
+                        ? { factKey: item.factKey.trim().slice(0, 80) }
+                        : {}),
+                      ...(Number.isFinite(occurredMs) ? { occurredAt: occurredMs } : {}),
+                    });
                     return {
                       id: `auto-${Date.now().toString(36)}-${index}`,
                       kind,
@@ -1762,9 +2041,35 @@ export class QqBridge {
       );
       group.summary = combined;
       group.keyMemories = mergeKeyMemories(group.keyMemories, incoming, policy.keyMemoryMax);
+      const drafts =
+        v3Incoming.length > 0
+          ? v3Incoming
+          : incoming.map((memory) => ({
+              text: memory.text,
+              category:
+                memory.kind === 'preference'
+                  ? ('preference' as const)
+                  : memory.kind === 'relationship'
+                    ? ('relationship' as const)
+                    : memory.kind === 'inside_joke'
+                      ? ('inside_joke' as const)
+                      : ('stable_profile' as const),
+              importance: memory.confidence,
+            }));
+      for (const memory of drafts) {
+        rememberMemory(this.memoryV3, groupId, {
+          text: memory.text,
+          category: memory.category,
+          importance: memory.importance,
+          ...(memory.factKey === undefined ? {} : { factKey: memory.factKey }),
+          ...(memory.occurredAt === undefined ? {} : { occurredAt: memory.occurredAt }),
+          source: 'chat',
+        });
+      }
       group.turns.splice(0, count);
       group.updatedAt = Date.now();
       this.persistMemory();
+      this.persistMemoryV3();
       if (policy.archiveEnabled) {
         try {
           appendFileSync(

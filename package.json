@@ -1,6 +1,6 @@
 {
   "name": "dsh-qq-group",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "独立的 DSH QQ 群聊插件：人设、主动/被动搭话、DSH 模型选择；与桌宠数据/记忆完全分开",
   "type": "module",
   "main": "lib/index.js",
@@ -45,14 +45,10 @@
   },
   "scripts": {
     "build": "tsdown",
-    "watch": "tsdown --watch"
+    "watch": "tsdown --watch",
+    "test:memory": "node tests/memory-v3.test.mjs"
   },
   "engines": {
     "node": ">=22.12.0"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/SenuMirai/dsh-qq-group.git"
-  },
-  "homepage": "https://github.com/SenuMirai/dsh-qq-group#readme"
+  }
 }
