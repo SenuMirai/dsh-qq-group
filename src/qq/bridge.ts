@@ -1180,12 +1180,13 @@ export class QqBridge {
         return;
       }
 
-      // 内心吐槽：不发群，只进「鲸鱼娘的日记」
-      if (plan.thought !== undefined && plan.thought.trim() !== '') {
+      // 日记：每条真正生成的回复都记；模型没写 thought 也记一条，避免“日记不更新”
+      {
         const decision = this.lastDecision.get(groupId);
         const speakerId = message?.userId ?? this.lastSpeaker.get(groupId) ?? '';
         const profile = speakerId === '' ? undefined : this.deps.profiles?.get(groupId, speakerId);
         const context = transcript(recentTurns(group, 6), this.config.selfName, Date.now());
+        const thought = plan.thought?.trim() || '（这次模型没有写内心吐槽）';
         this.deps.onDiary?.({
           ts: Date.now(),
           groupId,
@@ -1194,7 +1195,7 @@ export class QqBridge {
           incoming: message?.text ?? (mode === 'proactive' ? '（主动开口）' : ''),
           context,
           reply: plan.messages.join(' / '),
-          thought: plan.thought.trim(),
+          thought,
           ...(decision === undefined ? {} : { score: decision.score, reasons: decision.reasons }),
           ...(profile === undefined ? {} : { familiarity: profile.familiarity, affinity: profile.affinity }),
         });

@@ -238,7 +238,19 @@ export function parseReplyPlan(raw: string): ReplyPlan {
     .split(/\r?\n+/)
     .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.、)])\s*/, '').trim())
     .filter((line) => line !== '' && !/^```/.test(line));
-  return { messages: lines, action: 'text' };
+  const thought = extractJsonString(cleaned, 'thought');
+  return { messages: lines, action: 'text', ...(thought === undefined ? {} : { thought }) };
+}
+
+/** 从半损坏的 JSON 文本里抢救一个字符串字段（避免日记因 thought 丢失） */
+function extractJsonString(text: string, key: string): string | undefined {
+  const match = new RegExp(`"${key}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`).exec(text);
+  if (match === null) return undefined;
+  try {
+    return JSON.parse(`"${match[1]}"`) as string;
+  } catch {
+    return match[1];
+  }
 }
 
 /** 去掉围栏 ```json ... ``` */

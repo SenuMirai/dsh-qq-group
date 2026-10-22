@@ -158,6 +158,7 @@ export function groupSystemPrompt(input: PromptInput): string {
       '  平时是 text。只有当这句话**说出来比打出来更有味道**（撒娇、唱歌、念诗、语气词很多）才用 voice。',
       '  用 voice 时，messages 里的内容会被朗读，所以写成口语，不要有括号和表情符号。',
       'thought 是你真正的想法（2~3 句），不会发到群里，可以吐槽、犯花痴、嫌烦、得意——写得像自己。',
+      '每次都必须输出完整 JSON 对象，并且必须带 thought 字段；不要只输出纯文本，也不要把 JSON 包在解释里。',
     ].join('\n'),
   );
 

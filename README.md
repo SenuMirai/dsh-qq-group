@@ -195,6 +195,15 @@ DSH 设置 →「QQ 群聊」→「连接」：
 
 
 
+
+
+### v1.2.2 日记修复
+
+- 每条实际生成的回复都会写日记；模型没给 `thought` 时用占位内心记录，不再整条丢失。
+- 兼容半损坏 JSON：从文本里抢救 `thought` 字段。
+- 提示词强化“必须输出完整 JSON 且带 thought”。
+- 日记页在打开时每 5 秒自动刷新。
+
 ### v1.2.0 设置页排版
 
 - 「用户画像」与「评分权重」改为分组卡片 + 自适应两列网格；
@@ -419,6 +428,15 @@ Each project keeps its own license; this project borrows design ideas only and d
 
 
 
+
+
+
+### v1.2.2 diary fix
+
+- Every generated reply is now written to the diary; when the model omits `thought`, a placeholder inner note is stored instead of dropping the entry.
+- Tolerant extraction of `thought` from partially broken JSON.
+- Prompt now explicitly requires a complete JSON object with `thought`.
+- The diary tab auto-refreshes every 5 seconds while open.
 
 ### v1.2.0 settings layout
 
