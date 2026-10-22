@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## 1.8.0 — RVC 外部 worker 接口
+
+- 新增可选 RVC：edge-tts 干音 → 外部 Python worker → 变声 WAV → QQ 语音。
+- 语音和唱歌共用 `RvcConverter`；失败自动回退原音。
+- 配置：Python、worker 脚本、模型/index、设备（auto/cpu/dml）、变调、超时。
+- 780M 核显优先 DirectML worker；不追求实时，允许排队生成。
+- 未配置脚本/模型时不启用，不影响现有 edge-tts。
+- 保留 `sing.rvcModel` 兼容，作为 `rvc.modelPath` 的回退。
+
 ## 1.7.1 — 引用图片与启动默认值
 
 - 修复：别人引用之前的图片时，当前消息没有图片段；现在通过 `get_msg` 拉取被引用消息里的图片再交给视觉模型。

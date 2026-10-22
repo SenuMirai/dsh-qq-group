@@ -103,6 +103,7 @@ import { builtinTitles, findBuiltinScore, parseScore, type Score } from '../soun
 import { resolveBackend } from '../sound/sing';
 import { encodeWave } from '../sound/wav';
 import { Speaker, describeFailure } from '../sound/tts';
+import { createCommandRvcConverter, type RvcConverter } from '../sound/rvc';
 import type { GroupMessage, ObEvent, ObGroupMessageEvent, ObPrivateMessageEvent, ObSegment, QqAction, SendResult } from './types';
 
 /** 群上下文带多少条给模型（1 条 = 一句） */
@@ -281,6 +282,7 @@ export class QqBridge {
    */
   private readonly ownerCandidates = new Set<string>();
   private singsInFlight = 0;
+  private rvcConverter: RvcConverter | undefined;
   private lastError: string | undefined;
 
   constructor(deps: BridgeDeps) {
@@ -526,6 +528,24 @@ export class QqBridge {
       },
       ...(this.config.tts.pythonPath === '' ? {} : { ffmpeg: undefined }),
     });
+    if (this.config.rvc.enabled) {
+      const modelPath = this.config.rvc.modelPath || this.config.sing.rvcModel;
+      this.rvcConverter =
+        this.config.rvc.scriptPath.trim() !== '' && modelPath.trim() !== ''
+          ? createCommandRvcConverter({
+              pythonPath: this.config.rvc.pythonPath,
+              scriptPath: this.config.rvc.scriptPath,
+              modelPath,
+              indexPath: this.config.rvc.indexPath,
+              device: this.config.rvc.device,
+              pitch: this.config.rvc.pitch,
+              timeoutMs: this.config.rvc.timeoutMs,
+              maxSeconds: this.config.rvc.maxSeconds,
+            })
+          : undefined;
+    } else {
+      this.rvcConverter = undefined;
+    }
 
     this.client = new OneBotClient({
       url: this.config.url,
@@ -1627,6 +1647,18 @@ export class QqBridge {
     return sent;
   }
 
+  /** 可选 RVC 变声；失败/未配置时退回原音频，不丢消息 */
+  private async applyRvc(wav: Uint8Array): Promise<Uint8Array> {
+    const converter = this.rvcConverter;
+    if (converter === undefined) return wav;
+    const result = await converter.convert(wav);
+    if (!result.ok) {
+      this.log('warn', `RVC 变声失败，使用原音：${result.message}`);
+      return wav;
+    }
+    return result.wav;
+  }
+
   /** 在群里说一段话（语音） */
   private async speakInGroup(groupId: string, text: string): Promise<boolean> {
     const speaker = this.speaker;
@@ -1645,7 +1677,8 @@ export class QqBridge {
     // QQ 的 record 段：NapCat 会用内置 ffmpeg 把 WAV 转成 silk
     const path = this.audioPath(`voice-${Date.now()}.wav`);
     try {
-      writeFileSync(path, encodeWave(result.pcm));
+      const wav = await this.applyRvc(encodeWave(result.pcm));
+      writeFileSync(path, wav);
     } catch (e) {
       this.recordError(`音频落盘失败：${e instanceof Error ? e.message : String(e)}`);
       return false;
@@ -1708,7 +1741,8 @@ export class QqBridge {
       }
 
       const path = this.audioPath(`sing-${Date.now()}.wav`);
-      writeFileSync(path, rendered.wav);
+      const wav = await this.applyRvc(rendered.wav);
+      writeFileSync(path, wav);
       this.log(
         'info',
         `唱歌完成：${score.title}，${rendered.report.duration.toFixed(1)} 秒，${rendered.report.notes} 个音`,

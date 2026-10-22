@@ -1,4 +1,4 @@
-# dsh-qq-group
+﻿# dsh-qq-group
 
 独立的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) QQ 群聊插件：有人设、有记忆、会判断该不该接话，支持主动/被动搭话、语音、唱歌、表情包、日记和视觉看图。
 
@@ -208,6 +208,16 @@ DSH 设置 →「QQ 群聊」→「连接」：
 
 
 
+
+
+
+### v1.8.0 RVC 外部 worker 接口
+
+- 可选 RVC：edge-tts 干音 → 外部 Python worker → 变声 WAV → QQ 语音。
+- 语音和唱歌共用 RvcConverter；失败自动回退原音。
+- 配置 Python、worker 脚本、模型/index、设备 auto/cpu/dml、变调、超时。
+- 780M 核显优先 DirectML worker；不追求实时。
+- 未配置脚本/模型时不启用，不影响现有 edge-tts。
 
 ### v1.7.1 引用图片与启动默认值
 
@@ -503,6 +513,16 @@ Each project keeps its own license; this project borrows design ideas only and d
 
 
 
+
+
+
+### v1.8.0 RVC external worker
+
+- Optional RVC: edge-tts dry audio → external Python worker → converted WAV → QQ voice.
+- Speech and singing share RvcConverter; failures fall back to the original audio.
+- Configure Python, worker script, model/index, device auto/cpu/dml, pitch and timeout.
+- 780M iGPU can use DirectML; real-time is not required.
+- Disabled when no script/model is configured; existing edge-tts is unaffected.
 
 ### v1.7.1 quoted images and auto-start
 

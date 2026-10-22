@@ -228,6 +228,22 @@ export interface QqSingConfig {
   mix: MixConfig;
 }
 
+/** RVC 外部 worker 配置（语音/唱歌共用） */
+export interface QqRvcConfig {
+  enabled: boolean;
+  /** Python 解释器；空 = python */
+  pythonPath: string;
+  /** worker 脚本路径 */
+  scriptPath: string;
+  /** 模型路径；留空回退 sing.rvcModel */
+  modelPath: string;
+  indexPath: string;
+  device: 'auto' | 'cpu' | 'dml' | 'cuda';
+  pitch: number;
+  timeoutMs: number;
+  maxSeconds: number;
+}
+
 /** 混音链参数（全部可调，见 src/sound/mix.ts） */
 export interface MixConfig {
   /** 总增益（dB） */
@@ -283,6 +299,7 @@ export interface QqConfig {
   llm: LlmConfig;
   tts: QqTtsConfig;
   sing: QqSingConfig;
+  rvc: QqRvcConfig;
   /** 管理接口的访问令牌（云上必须设置；空 = 只允许本机） */
   adminToken: string;
   /** 日志级别 */
@@ -449,6 +466,17 @@ export function defaultConfig(): QqConfig {
       rvcModel: '',
       scoreDir: '',
       mix: defaultMix(),
+    },
+    rvc: {
+      enabled: false,
+      pythonPath: 'python',
+      scriptPath: '',
+      modelPath: '',
+      indexPath: '',
+      device: 'auto',
+      pitch: 0,
+      timeoutMs: 120_000,
+      maxSeconds: 45,
     },
     adminToken: '',
     logLevel: 'info',
@@ -760,6 +788,7 @@ export function normalizeConfig(raw: unknown): QqConfig {
   const llmSrc = (src.llm ?? {}) as Record<string, unknown>;
   const ttsSrc = (src.tts ?? {}) as Record<string, unknown>;
   const singSrc = (src.sing ?? {}) as Record<string, unknown>;
+  const rvcSrc = (src.rvc ?? {}) as Record<string, unknown>;
 
   return {
     enabled: bool(src.enabled, 'enabled', base.enabled),
@@ -795,6 +824,17 @@ export function normalizeConfig(raw: unknown): QqConfig {
       rvcModel: str(singSrc.rvcModel, 'sing.rvcModel', base.sing.rvcModel),
       scoreDir: str(singSrc.scoreDir, 'sing.scoreDir', base.sing.scoreDir),
       mix: normalizeMix(singSrc.mix),
+    },
+    rvc: {
+      enabled: rvcSrc.enabled === true,
+      pythonPath: str(rvcSrc.pythonPath, 'rvc.pythonPath', base.rvc.pythonPath),
+      scriptPath: str(rvcSrc.scriptPath, 'rvc.scriptPath', base.rvc.scriptPath),
+      modelPath: str(rvcSrc.modelPath, 'rvc.modelPath', base.rvc.modelPath),
+      indexPath: str(rvcSrc.indexPath, 'rvc.indexPath', base.rvc.indexPath),
+      device: enumOf(rvcSrc.device, 'rvc.device', base.rvc.device, ['auto', 'cpu', 'dml', 'cuda'] as const),
+      pitch: num(rvcSrc.pitch, 'rvc.pitch', base.rvc.pitch, -24, 24),
+      timeoutMs: num(rvcSrc.timeoutMs, 'rvc.timeoutMs', base.rvc.timeoutMs, 5_000, 600_000),
+      maxSeconds: num(rvcSrc.maxSeconds, 'rvc.maxSeconds', base.rvc.maxSeconds, 1, 300),
     },
     adminToken: str(src.adminToken, 'adminToken', base.adminToken),
     logLevel: enumOf(src.logLevel, 'logLevel', base.logLevel, ['debug', 'info', 'warn', 'error'] as const),
