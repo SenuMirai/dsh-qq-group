@@ -1,6 +1,6 @@
 {
   "name": "dsh-qq-group",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "独立的 DSH QQ 群聊插件：人设、主动/被动搭话、DSH 模型选择；与桌宠数据/记忆完全分开",
   "type": "module",
   "main": "lib/index.js",
@@ -46,7 +46,9 @@
   "scripts": {
     "build": "tsdown",
     "watch": "tsdown --watch",
-    "test:memory": "node tests/memory-v3.test.mjs"
+    "test:memory": "node tests/memory-v3.test.mjs",
+    "test:proactive": "node tests/proactive.test.mjs",
+    "test": "npm run test:memory && npm run test:proactive"
   },
   "engines": {
     "node": ">=22.12.0"

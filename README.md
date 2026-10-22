@@ -203,6 +203,16 @@ DSH 设置 →「QQ 群聊」→「连接」：
 
 
 
+
+
+### v1.6.0 主动搭话 v2
+
+- 概率命中线：峰/谷基础线 × 时机因子 + 没中加成。
+- 刚聊过更难开口，冷太久更容易开口；安静时段不掷。
+- 试运行默认开，只记账不发送；每轮只挑一个群。
+- 保留旧版固定退避模式，可切换。
+- 接话页新增参数面板和未中次数/试运行状态。
+
 ### v1.5.0 记忆 v3
 
 - 新增 memory-v3 数据层：鲜活度、重要度、情绪、事实键、来源。
@@ -469,6 +479,16 @@ Each project keeps its own license; this project borrows design ideas only and d
 
 
 
+
+
+
+### v1.6.0 proactive v2
+
+- Probability hit line: peak/off-peak base × timing factor + miss bonus.
+- Recent chat makes it harder; long silence makes it easier; quiet hours skip.
+- Trial mode defaults on (log only); one group per tick.
+- Legacy fixed-backoff mode remains selectable.
+- Chat tab adds controls and shows misses/trial state.
 
 ### v1.5.0 memory v3
 

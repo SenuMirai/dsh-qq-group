@@ -30,6 +30,10 @@ export interface GroupState {
   lastSelfAt?: number;
   /** 最近一次主动开口的时间 */
   lastProactiveAt?: number;
+  /** 最近一次主动尝试（含没命中/试运行） */
+  lastProactiveTryAt?: number;
+  /** 连续几次主动尝试没命中 */
+  proactiveMisses: number;
   /** 连续几次主动开口没人接 */
   ignoredProactive: number;
   /** 已排定的下一次主动开口时间（undefined = 还没排） */
@@ -51,6 +55,7 @@ export function createGroupState(groupId: string): GroupState {
   return {
     groupId,
     ignoredProactive: 0,
+    proactiveMisses: 0,
     replyTimes: [],
     directReplyTimes: [],
     proactiveDay: { day: '', count: 0 },
@@ -121,7 +126,12 @@ export function observeHuman(
   state.lastHumanAt = now;
   // 有人说话就算「群活着」：无论接的是不是她
   if (reset) state.ignoredProactive = 0;
-  state.nextProactiveAt = now + proactiveDelay(policy.proactive, state.ignoredProactive);
+  state.proactiveMisses = 0;
+  state.nextProactiveAt =
+    now +
+    (policy.proactive.mode === 'dice'
+      ? policy.proactive.intervalMs
+      : proactiveDelay(policy.proactive, state.ignoredProactive));
   // 冷场计时从**最后一条**消息重新开始：有人说话就不算冷场
   state.pendingSince = now;
   state.pendingCount += 1;
@@ -148,12 +158,18 @@ export function noteSelfSpoke(
 
   if (kind === 'proactive') {
     state.lastProactiveAt = now;
+    state.lastProactiveTryAt = now;
+    state.proactiveMisses = 0;
     const day = dayKey(now);
     if (state.proactiveDay.day !== day) state.proactiveDay = { day, count: 0 };
     state.proactiveDay.count += 1;
     // 先按「这次也被无视」排下一次；真有人接话时 observeHuman 会把计数清零并重排
     state.ignoredProactive += 1;
-    state.nextProactiveAt = now + proactiveDelay(policy.proactive, state.ignoredProactive);
+    state.nextProactiveAt =
+      now +
+      (policy.proactive.mode === 'dice'
+        ? policy.proactive.intervalMs
+        : proactiveDelay(policy.proactive, state.ignoredProactive));
   }
   return state;
 }
@@ -302,17 +318,90 @@ export function clearChatWindow(state: GroupState): void {
 export interface ProactiveVerdict {
   fire: boolean;
   /** 不触发时的原因（诊断用） */
-  reason?: 'disabled' | 'not-scheduled' | 'too-soon' | 'not-idle' | 'daily-cap' | 'cooldown' | 'busy';
+  reason?:
+    | 'disabled'
+    | 'not-scheduled'
+    | 'too-soon'
+    | 'not-idle'
+    | 'daily-cap'
+    | 'cooldown'
+    | 'busy'
+    | 'quiet';
   /** 还有多久（毫秒） */
   waitMs?: number;
+}
+
+/** 峰时：工作日 9–12、14–18；周末全谷时 */
+export function proactivePeak(now = Date.now()): boolean {
+  const date = new Date(now);
+  const day = date.getDay();
+  if (day === 0 || day === 6) return false;
+  const minutes = date.getHours() * 60 + date.getMinutes();
+  return (minutes >= 9 * 60 && minutes < 12 * 60) || (minutes >= 14 * 60 && minutes < 18 * 60);
+}
+
+/** 安静时段（含起不含止；start===end 关闭） */
+export function proactiveQuiet(cfg: ProactiveConfig, now = Date.now()): boolean {
+  if (cfg.quietStart === cfg.quietEnd) return false;
+  const hour = new Date(now).getHours();
+  if (cfg.quietStart < cfg.quietEnd) return hour >= cfg.quietStart && hour < cfg.quietEnd;
+  return hour >= cfg.quietStart || hour < cfg.quietEnd;
+}
+
+export interface ProactiveLine {
+  line: number;
+  base: number;
+  bonus: number;
+  factor: number;
+  peak: boolean;
+  quiet: boolean;
+  minutesSinceHuman?: number;
+}
+
+/** 计算本次主动开口的命中线；纯函数，测试可喂假时间 */
+export function proactiveLine(
+  state: GroupState,
+  policy: GroupPolicy,
+  now = Date.now(),
+): ProactiveLine {
+  const cfg = policy.proactive;
+  const peak = proactivePeak(now);
+  const base = peak ? cfg.peakLine : cfg.offPeakLine;
+  const minutesSinceHuman =
+    state.lastHumanAt === undefined ? undefined : Math.max(0, (now - state.lastHumanAt) / 60_000);
+  let factor = 1;
+  if (minutesSinceHuman !== undefined) {
+    if (cfg.nearMinutes > 0 && minutesSinceHuman < cfg.nearMinutes) factor = cfg.nearFactor;
+    else if (cfg.farMinutes > 0 && minutesSinceHuman > cfg.farMinutes) factor = cfg.farFactor;
+  }
+  const bonus = Math.min(cfg.missBonusMax, Math.max(0, state.proactiveMisses) * cfg.missBonus);
+  const line = Math.min(100, Math.max(0, base * factor + bonus));
+  const quiet = proactiveQuiet(cfg, now);
+  return { line: quiet ? 0 : line, base, bonus, factor, peak, quiet, ...(minutesSinceHuman === undefined ? {} : { minutesSinceHuman }) };
+}
+
+export interface ProactiveRoll extends ProactiveLine {
+  fire: boolean;
+  roll: number;
+}
+
+/** 掷一次骰子；roll ∈ [0,100)，小于命中线才开口 */
+export function proactiveRoll(
+  state: GroupState,
+  policy: GroupPolicy,
+  now = Date.now(),
+  random: () => number = Math.random,
+): ProactiveRoll {
+  const line = proactiveLine(state, policy, now);
+  const roll = random() * 100;
+  return { ...line, roll, fire: !line.quiet && line.line > 0 && roll < line.line };
 }
 
 /**
  * 现在该不该主动开口。
  *
  * 四道闸：开关 → 排定时间到没到 → 冷场够不够久 → 当天次数/冷却。
- * 「冷场够不够久」与「排定时间」是**两条不同的线**：前者防止在别人正聊天时插话，
- * 后者负责「越没人理越久」的退避。两条都过才开口。
+ * dice 模式在这里只判「到点没有」；真正的概率由 proactiveRoll 掷。
  */
 export function proactiveVerdict(
   state: GroupState,
@@ -328,20 +417,32 @@ export function proactiveVerdict(
   // 从没人说过话的群不主动开口：那是冷启动，得先有人搭理才轮到它装熟
   if (state.lastHumanAt === undefined) return { fire: false, reason: 'not-scheduled' };
 
-  // 冷场够不够久：这条闸要**先**判，它才是「现在能不能开口」的物理条件。
-  // 排定时间不再信任一个可能过期的 nextProactiveAt，而是**每次都用
-  // 「最后一条人类消息 / 最后一次主动开口」重新算**：
-  // 任何新消息都会把冷场时钟重置，不会继续沿用之前的等待。
   const idle = now - (state.lastHumanAt ?? now);
   if (idle < cfg.minIdleMs) {
     return { fire: false, reason: 'not-idle', waitMs: cfg.minIdleMs - idle };
   }
 
-  const base = Math.max(state.lastHumanAt, state.lastProactiveAt ?? 0);
-  const scheduledAt = base + proactiveDelay(cfg, state.ignoredProactive);
-  state.nextProactiveAt = scheduledAt;
-  if (now < scheduledAt) {
-    return { fire: false, reason: 'not-scheduled', waitMs: scheduledAt - now };
+  if (cfg.mode === 'dice') {
+    if (proactiveQuiet(cfg, now)) return { fire: false, reason: 'quiet' };
+    const base = Math.max(state.lastHumanAt, state.lastProactiveAt ?? 0, state.lastProactiveTryAt ?? 0);
+    const scheduledAt = base + cfg.intervalMs;
+    state.nextProactiveAt = scheduledAt;
+    if (now < scheduledAt) {
+      return { fire: false, reason: 'not-scheduled', waitMs: scheduledAt - now };
+    }
+    if (cfg.cooldownMs > 0 && state.lastProactiveAt !== undefined) {
+      const since = now - state.lastProactiveAt;
+      if (since < cfg.cooldownMs) {
+        return { fire: false, reason: 'cooldown', waitMs: cfg.cooldownMs - since };
+      }
+    }
+  } else {
+    const base = Math.max(state.lastHumanAt, state.lastProactiveAt ?? 0);
+    const scheduledAt = base + proactiveDelay(cfg, state.ignoredProactive);
+    state.nextProactiveAt = scheduledAt;
+    if (now < scheduledAt) {
+      return { fire: false, reason: 'not-scheduled', waitMs: scheduledAt - now };
+    }
   }
 
   const day = dayKey(now);
@@ -362,9 +463,22 @@ export function nextWakeup(state: GroupState, policy: GroupPolicy, now: number):
   if (state.pendingSince !== undefined) candidates.push(state.pendingSince + CHAT_DEBOUNCE_MS);
   if (state.lastSelfAt !== undefined) candidates.push(state.lastSelfAt + policy.cooldownMs);
   if (policy.proactive.enabled && state.lastHumanAt !== undefined) {
-    const base = Math.max(state.lastHumanAt, state.lastProactiveAt ?? 0);
-    candidates.push(base + proactiveDelay(policy.proactive, state.ignoredProactive));
-    candidates.push(state.lastHumanAt + policy.proactive.minIdleMs);
+    if (policy.proactive.mode === 'dice') {
+      const base = Math.max(state.lastHumanAt, state.lastProactiveAt ?? 0, state.lastProactiveTryAt ?? 0);
+      candidates.push(base + policy.proactive.intervalMs);
+      candidates.push(state.lastHumanAt + policy.proactive.minIdleMs);
+      if (proactiveQuiet(policy.proactive, now)) {
+        const end = new Date(now);
+        end.setMinutes(0, 0, 0);
+        end.setHours(policy.proactive.quietEnd);
+        if (end.getTime() <= now) end.setDate(end.getDate() + 1);
+        candidates.push(end.getTime());
+      }
+    } else {
+      const base = Math.max(state.lastHumanAt, state.lastProactiveAt ?? 0);
+      candidates.push(base + proactiveDelay(policy.proactive, state.ignoredProactive));
+      candidates.push(state.lastHumanAt + policy.proactive.minIdleMs);
+    }
   }
   const future = candidates.filter((t) => t > now);
   if (future.length === 0) return undefined;

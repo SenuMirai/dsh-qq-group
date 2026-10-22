@@ -74,6 +74,7 @@ import {
   noteSelfSpoke,
   observeHuman,
   proactiveVerdict,
+  proactiveRoll,
   proactiveDelay,
   rateVerdict,
   type GroupState,
@@ -386,7 +387,17 @@ export class QqBridge {
     link: unknown;
     selfQq: string;
     llm: string;
-    groups: Array<{ groupId: string; name?: string; received: number; replied: number; nextProactiveAt?: number; enabled: boolean }>;
+    groups: Array<{
+      groupId: string;
+      name?: string;
+      received: number;
+      replied: number;
+      nextProactiveAt?: number;
+      lastProactiveAt?: number;
+      proactiveMisses?: number;
+      proactiveTrial?: boolean;
+      enabled: boolean;
+    }>;
     lastError?: string;
   } {
     const now = Date.now();
@@ -397,6 +408,9 @@ export class QqBridge {
       replied: stat.replied,
       recentReplies: stat.state.replyTimes.filter((t) => t >= now - 10 * 60_000).length,
       ...(stat.state.nextProactiveAt === undefined ? {} : { nextProactiveAt: stat.state.nextProactiveAt }),
+      ...(stat.state.lastProactiveAt === undefined ? {} : { lastProactiveAt: stat.state.lastProactiveAt }),
+      proactiveMisses: stat.state.proactiveMisses,
+      proactiveTrial: this.policyOf(stat.groupId).proactive.trial,
       enabled: this.policyOf(stat.groupId).enabled,
     }));
     return {
@@ -509,7 +523,11 @@ export class QqBridge {
       if (lastUser !== undefined) state.lastHumanAt = lastUser.ts;
       if (lastSelf !== undefined) state.lastSelfAt = lastSelf.ts;
       if (policy.proactive.enabled && state.lastHumanAt !== undefined) {
-        state.nextProactiveAt = now + proactiveDelay(policy.proactive, state.ignoredProactive);
+        state.nextProactiveAt =
+          now +
+          (policy.proactive.mode === 'dice'
+            ? policy.proactive.intervalMs
+            : proactiveDelay(policy.proactive, state.ignoredProactive));
       }
     }
   }
@@ -525,7 +543,11 @@ export class QqBridge {
     for (const state of this.states.values()) {
       const policy = config.groups[state.groupId] ?? config.defaultGroup;
       if (policy.proactive.enabled && state.lastHumanAt !== undefined) {
-        state.nextProactiveAt = now + proactiveDelay(policy.proactive, state.ignoredProactive);
+        state.nextProactiveAt =
+          now +
+          (policy.proactive.mode === 'dice'
+            ? policy.proactive.intervalMs
+            : proactiveDelay(policy.proactive, state.ignoredProactive));
       }
     }
     this.scheduleTick();
@@ -1672,6 +1694,7 @@ export class QqBridge {
     if (!this.running || this.timer !== undefined) return;
     const now = Date.now();
     let next = Number.POSITIVE_INFINITY;
+    const proactiveCandidates: Array<{ groupId: string; policy: GroupPolicy; state: GroupState }> = [];
     for (const [groupId, state] of this.states) {
       const policy = this.policyOf(groupId);
       if (!policy.enabled) continue;
@@ -1724,9 +1747,33 @@ export class QqBridge {
           }
         }
       }
-      // 冷场 → 主动开口
+      // 冷场 → 主动开口：先收集候选，这一轮最多挑一个群
       const verdict = proactiveVerdict(state, policy, now, { busy: this.busy.has(groupId) });
-      if (verdict.fire) {
+      if (verdict.fire) proactiveCandidates.push({ groupId, policy, state });
+    }
+    if (proactiveCandidates.length > 0 && !this.muted) {
+      const picked = proactiveCandidates[Math.floor(Math.random() * proactiveCandidates.length)]!;
+      const { groupId, policy, state } = picked;
+      if (policy.proactive.mode === 'dice') {
+        const roll = proactiveRoll(state, policy, now);
+        const lineText = `${roll.peak ? '峰' : '谷'} ${roll.base}×${roll.factor.toFixed(2)}+${roll.bonus.toFixed(1)}=${roll.line.toFixed(1)}`;
+        if (!roll.fire) {
+          state.proactiveMisses += 1;
+          state.lastProactiveTryAt = now;
+          state.nextProactiveAt = now + policy.proactive.intervalMs;
+          this.log('info', `群 ${groupId} 主动搭话未命中：掷 ${roll.roll.toFixed(1)} / 命中线 ${lineText}（下次尝试 ${Math.round(policy.proactive.intervalMs / 60000)} 分钟后）`);
+        } else if (policy.proactive.trial) {
+          state.lastProactiveTryAt = now;
+          state.proactiveMisses = 0;
+          state.nextProactiveAt = now + policy.proactive.intervalMs;
+          this.log('info', `群 ${groupId} 主动搭话命中，但试运行开着（掷 ${roll.roll.toFixed(1)} / 命中线 ${lineText}），不发送`);
+        } else {
+          this.log('info', `群 ${groupId} 主动搭话命中：掷 ${roll.roll.toFixed(1)} / 命中线 ${lineText}`);
+          void this.replyTo(groupId, policy, undefined, 'proactive', now).catch((e) => {
+            this.recordError(`主动开口异常：${e instanceof Error ? e.message : String(e)}`);
+          });
+        }
+      } else {
         void this.replyTo(groupId, policy, undefined, 'proactive', now).catch((e) => {
           this.recordError(`主动开口异常：${e instanceof Error ? e.message : String(e)}`);
         });

@@ -38,6 +38,30 @@ export interface ProactiveConfig {
   resetOnHuman: boolean;
   /** 一天最多主动开口几次（0 = 不限） */
   maxPerDay: number;
+  /** legacy = 固定退避计时；dice = 带概率/峰谷/时机的命中线 */
+  mode: 'legacy' | 'dice';
+  /** dice 模式两次尝试的最小间隔 */
+  intervalMs: number;
+  /** 峰时基础命中线（0~100） */
+  peakLine: number;
+  /** 谷时基础命中线（0~100） */
+  offPeakLine: number;
+  /** 安静时段（小时，含起不含止；start===end = 关闭） */
+  quietStart: number;
+  quietEnd: number;
+  /** 距上次人类说话 < nearMinutes → 命中线 × nearFactor */
+  nearMinutes: number;
+  nearFactor: number;
+  /** 距上次人类说话 > farMinutes → 命中线 × farFactor */
+  farMinutes: number;
+  farFactor: number;
+  /** 每次没命中攒多少百分点，最多 missBonusMax */
+  missBonus: number;
+  missBonusMax: number;
+  /** 主动开口后的独立冷却 */
+  cooldownMs: number;
+  /** 试运行：只记录，不实际发送 */
+  trial: boolean;
 }
 
 /** 单个群的策略 */
@@ -311,6 +335,20 @@ export function defaultGroupPolicy(): GroupPolicy {
       maxDelayMs: 60 * 60_000,
       resetOnHuman: true,
       maxPerDay: 8,
+      mode: 'dice',
+      intervalMs: 30 * 60_000,
+      peakLine: 20,
+      offPeakLine: 60,
+      quietStart: 1,
+      quietEnd: 8,
+      nearMinutes: 20,
+      nearFactor: 0.15,
+      farMinutes: 360,
+      farFactor: 1.5,
+      missBonus: 10,
+      missBonusMax: 40,
+      cooldownMs: 20 * 60_000,
+      trial: true,
     },
     voiceChance: 0.25,
     voiceMaxChars: 80,
@@ -596,6 +634,20 @@ export function normalizeGroupPolicy(raw: unknown, path: string, base = defaultG
       maxDelayMs: num(pro.maxDelayMs, `${path}.proactive.maxDelayMs`, base.proactive.maxDelayMs, 0, 30 * 24 * 3600_000),
       resetOnHuman: bool(pro.resetOnHuman, `${path}.proactive.resetOnHuman`, base.proactive.resetOnHuman),
       maxPerDay: num(pro.maxPerDay, `${path}.proactive.maxPerDay`, base.proactive.maxPerDay, 0, 1000),
+      mode: pro.mode === 'legacy' ? 'legacy' : 'dice',
+      intervalMs: num(pro.intervalMs, `${path}.proactive.intervalMs`, base.proactive.intervalMs, 60_000, 24 * 3600_000),
+      peakLine: num(pro.peakLine, `${path}.proactive.peakLine`, base.proactive.peakLine, 0, 100),
+      offPeakLine: num(pro.offPeakLine, `${path}.proactive.offPeakLine`, base.proactive.offPeakLine, 0, 100),
+      quietStart: Math.round(num(pro.quietStart, `${path}.proactive.quietStart`, base.proactive.quietStart, 0, 23)),
+      quietEnd: Math.round(num(pro.quietEnd, `${path}.proactive.quietEnd`, base.proactive.quietEnd, 0, 23)),
+      nearMinutes: num(pro.nearMinutes, `${path}.proactive.nearMinutes`, base.proactive.nearMinutes, 0, 100000),
+      nearFactor: num(pro.nearFactor, `${path}.proactive.nearFactor`, base.proactive.nearFactor, 0, 100),
+      farMinutes: num(pro.farMinutes, `${path}.proactive.farMinutes`, base.proactive.farMinutes, 0, 100000),
+      farFactor: num(pro.farFactor, `${path}.proactive.farFactor`, base.proactive.farFactor, 0, 100),
+      missBonus: num(pro.missBonus, `${path}.proactive.missBonus`, base.proactive.missBonus, 0, 100),
+      missBonusMax: num(pro.missBonusMax, `${path}.proactive.missBonusMax`, base.proactive.missBonusMax, 0, 100),
+      cooldownMs: num(pro.cooldownMs, `${path}.proactive.cooldownMs`, base.proactive.cooldownMs, 0, 24 * 3600_000),
+      trial: pro.trial !== false,
     },
     voiceChance: num(src.voiceChance, `${path}.voiceChance`, base.voiceChance, 0, 1),
     voiceMaxChars: num(src.voiceMaxChars, `${path}.voiceMaxChars`, base.voiceMaxChars, 0, 500),
