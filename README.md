@@ -193,6 +193,15 @@ DSH 设置 →「QQ 群聊」→「连接」：
 
 
 
+
+
+### v1.2.0 设置页排版
+
+- 「用户画像」与「评分权重」改为分组卡片 + 自适应两列网格；
+- 数字输入框固定 82px，右侧带单位，不再整行拉满；
+- 按“关系语气 / 熟识度增长 / 好感度增长 / 敌意与衰减 / 初始好感 / 名单”分段；
+- 说明卡片放在分组顶部，长文本与输入项不再挤在一起。
+
 ### v0.2.2 用户画像
 
 - 「名单」Tab 改名「用户画像」，熟识度/好感度相关设置全部集中到这里。
@@ -408,6 +417,15 @@ Each project keeps its own license; this project borrows design ideas only and d
 
 
 
+
+
+
+### v1.2.0 settings layout
+
+- User Profiles and Score Weights now use section cards with an adaptive two-column grid.
+- Numeric fields are fixed at 82px with units, instead of stretching across the row.
+- Sections: tone guide / familiarity growth / affinity growth / hostility and decay / initial affinity / lists.
+- Explanation cards sit above each group; long text no longer crowds the inputs.
 
 ### v0.2.2 User profiles
 
