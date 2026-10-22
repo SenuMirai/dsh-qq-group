@@ -32,6 +32,20 @@ import { basename, join } from 'node:path';
 
 import { policyFor, type GroupPolicy, type QqConfig } from './config';
 import { createOpenAiClient, parseReplyPlan, type ChatClient, type ChatImage } from './llm';
+import {
+  applyMoodJudgement,
+  decayMood,
+  emptyMoodStore,
+  groupMood,
+  markMoodInjected,
+  moodInjection,
+  moodSnapshot,
+  readMoodStore,
+  resetMood,
+  writeMoodStore,
+  type MoodDims,
+  type MoodStore,
+} from './mood';
 import type { SelfieHub, SelfieInfo } from './selfies';
 import {
   appendTurn,
@@ -228,6 +242,8 @@ export class QqBridge {
   private memoryPath = '';
   private memoryV3: MemoryStoreV3 = emptyMemoryStore();
   private memoryV3Path = '';
+  private moods: MoodStore = emptyMoodStore();
+  private moodPath = '';
   private timer: ReturnType<typeof setTimeout> | undefined;
   private running = false;
   /** 正在处理中的群（同一个群不并发回复） */
@@ -236,6 +252,7 @@ export class QqBridge {
   private readonly compressing = new Set<string>();
   private readonly memoryV3Extracting = new Set<string>();
   private readonly memoryV3ExtractedAt = new Map<string, number>();
+  private readonly moodJudging = new Set<string>();
   /** 每群每天读取文件计数 */
   private readonly fileReadDays = new Map<string, { day: string; count: number }>();
   /** 正在生成时收到的 @/引用消息：排队，不丢 */
@@ -297,6 +314,32 @@ export class QqBridge {
         archiveEnabled: policy.archiveEnabled,
       },
     };
+  }
+
+  /** 当前群心情快照；会先做一次自然回稳 */
+  moodSnapshot(groupId: string): Record<string, unknown> {
+    const policy = this.policyOf(groupId);
+    const mood = groupMood(
+      this.moods,
+      groupId,
+      { baseline: policy.moodBaseline, floor: policy.moodFloor, halfLifeHours: policy.moodHalfLifeHours },
+      Date.now(),
+    );
+    decayMood(mood, Date.now(), {
+      baseline: policy.moodBaseline,
+      floor: policy.moodFloor,
+      halfLifeHours: policy.moodHalfLifeHours,
+    });
+    return { ok: true, groupId, enabled: policy.moodEnabled !== false, ...moodSnapshot(mood) };
+  }
+
+  /** 把当前群心情重置到基线 */
+  resetMood(groupId: string): Record<string, unknown> {
+    const policy = this.policyOf(groupId);
+    const mood = groupMood(this.moods, groupId, {}, Date.now());
+    resetMood(mood, { baseline: policy.moodBaseline, floor: policy.moodFloor }, Date.now());
+    this.persistMood();
+    return { ok: true, groupId, ...moodSnapshot(mood) };
   }
 
   /** 手动保存关键记忆列表（完整替换） */
@@ -449,6 +492,8 @@ export class QqBridge {
 
     this.memoryV3Path = join(this.deps.userRoot, 'memory-v3.json');
     this.memoryV3 = readMemoryStore(this.memoryV3Path);
+    this.moodPath = join(this.deps.userRoot, 'moods.json');
+    this.moods = readMoodStore(this.moodPath);
     let migrated = 0;
     for (const [groupId, group] of Object.entries(this.memory.groups)) {
       if ((this.memoryV3.groups[groupId]?.items.length ?? 0) > 0) continue;
@@ -1243,6 +1288,37 @@ export class QqBridge {
                 .slice(0, 30)
                 .map((item) => `- [${item.kind}] ${item.text}`)
                 .join('\n')}`;
+      let moodNote = '';
+      if (policy.moodEnabled) {
+        const mood = groupMood(
+          this.moods,
+          groupId,
+          {
+            baseline: policy.moodBaseline,
+            floor: policy.moodFloor,
+            halfLifeHours: policy.moodHalfLifeHours,
+          },
+          now,
+        );
+        decayMood(mood, now, {
+          halfLifeHours: policy.moodHalfLifeHours,
+          baseline: policy.moodBaseline,
+          floor: policy.moodFloor,
+        });
+        const injection = moodInjection(
+          mood,
+          {
+            confidenceThreshold: policy.moodConfidence,
+            dailyInject: policy.moodDailyInject,
+          },
+          now,
+        );
+        if (injection.inject) {
+          moodNote = `\n\n【此刻心情】${injection.line}`;
+          markMoodInjected(mood, now);
+          this.persistMood();
+        }
+      }
       const fileNote = this.shouldReadFiles(groupId, policy, message, mode)
         ? await this.readFileContext(groupId, policy, message)
         : '';
@@ -1256,7 +1332,7 @@ export class QqBridge {
           const reserve = Math.min(4096, Math.floor(window * 0.25));
           const budget = Math.max(1000, window - reserve);
           const fixed =
-            estimateTokens(profileNote + summaryNote + keyMemoryNote + fileNote + forwardNote + (message?.text ?? '')) +
+            estimateTokens(profileNote + summaryNote + keyMemoryNote + moodNote + fileNote + forwardNote + (message?.text ?? '')) +
             700;
           while (
             turns.length > 1 &&
@@ -1305,7 +1381,7 @@ export class QqBridge {
 
       const result = await this.llm.chat(
         [
-          { role: 'system', content: system + profileNote + summaryNote + keyMemoryNote + fileNote + forwardNote },
+          { role: 'system', content: system + profileNote + summaryNote + keyMemoryNote + moodNote + fileNote + forwardNote },
           {
             role: 'user',
             content:
@@ -1399,6 +1475,9 @@ export class QqBridge {
         }
         if (mode !== 'proactive' && message !== undefined) {
           void this.maybeExtractMemoryV3(groupId, message.text, plan.messages.join(' / '));
+          if (directish || mode === 'at') {
+            void this.judgeMood(groupId, message.text, plan.messages.join(' / '));
+          }
         }
       }
     } catch (e) {
@@ -1819,6 +1898,15 @@ export class QqBridge {
   }
 
   /** 记忆落盘（失败只记日志，不影响对话） */
+  private persistMood(): void {
+    if (this.moodPath === '') return;
+    try {
+      writeMoodStore(this.moodPath, this.moods);
+    } catch (e) {
+      this.log('warn', `写心情失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   private persistMemoryV3(): void {
     if (this.memoryV3Path === '') return;
     try {
@@ -1852,6 +1940,81 @@ export class QqBridge {
     void this.maybeCompressMemory(groupId).catch((e) => {
       this.log('warn', `压缩记忆失败：${e instanceof Error ? e.message : String(e)}`);
     });
+  }
+
+  /**
+   * 按群心情：直接把这一轮用户话/她的回复交给模型判一次。
+   * 只在直接对话后跑；失败静默，不阻塞聊天。
+   */
+  private async judgeMood(groupId: string, userText: string, replyText: string): Promise<void> {
+    const policy = this.policyOf(groupId);
+    if (policy.moodEnabled === false || this.llm === undefined || this.moodJudging.has(groupId)) return;
+    this.moodJudging.add(groupId);
+    try {
+      const mood = groupMood(
+        this.moods,
+        groupId,
+        { baseline: policy.moodBaseline, floor: policy.moodFloor, halfLifeHours: policy.moodHalfLifeHours },
+        Date.now(),
+      );
+      decayMood(mood, Date.now(), {
+        baseline: policy.moodBaseline,
+        floor: policy.moodFloor,
+        halfLifeHours: policy.moodHalfLifeHours,
+      });
+      const system = [
+        `你是「${this.config.selfName}」。判断这一轮你自己的心情和七根情绪发生了什么变化。`,
+        '只输出 JSON，不要解释：',
+        '{"moodDelta":0,"dims":{"happy":0,"calm":0,"sweet":0,"heartache":0,"worry":0,"sad":0,"jealous":0},"reason":"","confidence":80}',
+        'moodDelta 范围 -10~+10，大多数时候 -4~+4；dims 每根 -10~+10。',
+        '心情下降只能因为心疼对方、担心对方，或你自己难过；绝不能因为对方惹你生气就降。',
+        'reason 用一句过去式中文，写“对方做了什么，我当时怎么应”，不要写“此刻/现在/一直”。',
+        'confidence 0~100：事情清楚才给 80~95，只能凭语气猜给 40~70，没把握就低。',
+        '不要编造对方没说的细节；没有明显变化就全 0。',
+      ].join('\n');
+      const user = [
+        `对方：${userText.slice(0, 800)}`,
+        `你：${replyText.slice(0, 800)}`,
+      ].join('\n');
+      const result = await this.llm.chat(
+        [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+        { json: true, timeoutMs: 20_000, purpose: 'mood' },
+      );
+      if (!result.ok) return;
+      const match = /\{[\s\S]*\}/.exec(result.text);
+      if (match === null) return;
+      let parsed: {
+        moodDelta?: unknown;
+        dims?: unknown;
+        reason?: unknown;
+        confidence?: unknown;
+      };
+      try {
+        parsed = JSON.parse(match[0]) as typeof parsed;
+      } catch {
+        return;
+      }
+      const rawDims = (parsed.dims !== null && typeof parsed.dims === 'object' ? parsed.dims : {}) as Record<string, unknown>;
+      const dims: Partial<MoodDims> = {};
+      for (const key of ['happy', 'calm', 'sweet', 'heartache', 'worry', 'sad', 'jealous'] as const) {
+        const value = rawDims[key];
+        if (typeof value === 'number' && Number.isFinite(value)) dims[key] = value;
+      }
+      applyMoodJudgement(mood, {
+        moodDelta: typeof parsed.moodDelta === 'number' ? parsed.moodDelta : 0,
+        dims,
+        reason: typeof parsed.reason === 'string' ? parsed.reason : '',
+        confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0,
+      });
+      this.persistMood();
+    } catch (e) {
+      this.log('warn', `心情判断失败：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      this.moodJudging.delete(groupId);
+    }
   }
 
   /**

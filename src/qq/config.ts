@@ -109,6 +109,18 @@ export interface GroupPolicy {
   memoryV3MaxItems: number;
   memoryV3MaxChars: number;
   memoryV3Threshold: number;
+  /** 启用按群心情 v1 */
+  moodEnabled: boolean;
+  /** 心情基线 0~100 */
+  moodBaseline: number;
+  /** 心情下限 */
+  moodFloor: number;
+  /** 回稳半衰期（小时） */
+  moodHalfLifeHours: number;
+  /** 注入可信度门槛 0~100 */
+  moodConfidence: number;
+  /** 每天最多把心情说给它听几次 */
+  moodDailyInject: number;
   /** 压缩掉的原文是否归档 */
   archiveEnabled: boolean;
   /** 文件读取总开关：off / all / custom */
@@ -317,6 +329,12 @@ export function defaultGroupPolicy(): GroupPolicy {
     memoryV3MaxItems: 6,
     memoryV3MaxChars: 800,
     memoryV3Threshold: 0.35,
+    moodEnabled: true,
+    moodBaseline: 70,
+    moodFloor: 0,
+    moodHalfLifeHours: 12,
+    moodConfidence: 60,
+    moodDailyInject: 6,
     archiveEnabled: true,
     fileReadMode: 'custom',
     fileReadModes: ['at', 'question'],
@@ -590,6 +608,12 @@ export function normalizeGroupPolicy(raw: unknown, path: string, base = defaultG
     memoryV3MaxItems: Math.round(num(src.memoryV3MaxItems, `${path}.memoryV3MaxItems`, base.memoryV3MaxItems, 1, 20)),
     memoryV3MaxChars: Math.round(num(src.memoryV3MaxChars, `${path}.memoryV3MaxChars`, base.memoryV3MaxChars, 100, 4000)),
     memoryV3Threshold: num(src.memoryV3Threshold, `${path}.memoryV3Threshold`, base.memoryV3Threshold, 0, 1),
+    moodEnabled: src.moodEnabled !== false,
+    moodBaseline: Math.round(num(src.moodBaseline, `${path}.moodBaseline`, base.moodBaseline, 0, 100)),
+    moodFloor: Math.round(num(src.moodFloor, `${path}.moodFloor`, base.moodFloor, 0, 100)),
+    moodHalfLifeHours: num(src.moodHalfLifeHours, `${path}.moodHalfLifeHours`, base.moodHalfLifeHours, 1, 168),
+    moodConfidence: Math.round(num(src.moodConfidence, `${path}.moodConfidence`, base.moodConfidence, 0, 100)),
+    moodDailyInject: Math.round(num(src.moodDailyInject, `${path}.moodDailyInject`, base.moodDailyInject, 0, 50)),
     archiveEnabled: src.archiveEnabled !== false,
     fileReadMode: enumOf<'off' | 'all' | 'custom'>(
       src.fileReadMode,

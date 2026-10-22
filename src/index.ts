@@ -146,7 +146,7 @@ const DEFAULT_SETTINGS: Settings = {
   stickerMaxMB: 200,
   autoStart: true,
   autoLaunchNapcat: true,
-  napcatLauncher: '',
+  napcatLauncher: 'C:\\DSHwork\\start-napcat.bat',
   whitelist: [],
   whitelistFloor: 95,
   blacklist: [],
@@ -1294,6 +1294,15 @@ export function apply(ctx: any): void {
           maxMB: readSettings(root).stickerMaxMB,
           dir,
         });
+      }
+
+      if (rest === 'mood') {
+        const urlGroup = url.searchParams.get('groupId') ?? '';
+        if (method === 'GET') return send(200, await qqHost.mood(urlGroup, 'get'));
+        if (method !== 'POST') return send(405, { error: 'method not allowed' });
+        const payload = JSON.parse(body || 'null') as { action?: unknown; groupId?: unknown } | null;
+        const groupId = typeof payload?.groupId === 'string' ? payload.groupId : urlGroup;
+        return send(200, await qqHost.mood(groupId, payload?.action === 'reset' ? 'reset' : 'get'));
       }
 
       if (rest === 'memory') {

@@ -205,6 +205,16 @@ DSH 设置 →「QQ 群聊」→「连接」：
 
 
 
+
+
+### v1.7.0 按群心情 v1
+
+- 每个群独立心情 0~100 + 七根情绪，基线默认 70。
+- 直接对话后短模型判断一次，实际变化除以 3；12 小时半衰期。
+- 可信度不足/变化不显著/每日额度满时不注入。
+- 注入只作背景，不写成命令；不因被冒犯降心情。
+- 接话页可看心情、情绪、最近理由并重置。
+
 ### v1.6.0 主动搭话 v2
 
 - 概率命中线：峰/谷基础线 × 时机因子 + 没中加成。
@@ -481,6 +491,16 @@ Each project keeps its own license; this project borrows design ideas only and d
 
 
 
+
+
+
+### v1.7.0 per-group mood v1
+
+- Each group has its own mood 0–100 plus seven dimensions; baseline 70.
+- A short model judgement after direct replies; actual change divided by 3; 12h half-life.
+- Low confidence / insignificant / daily cap means no injection.
+- Injection is background only, never a command; insults do not lower mood.
+- Chat tab shows mood, dimensions, latest reason and reset.
 
 ### v1.6.0 proactive v2
 

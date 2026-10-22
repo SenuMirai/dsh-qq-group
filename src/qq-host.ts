@@ -74,6 +74,8 @@ export interface QqHost {
     groupId: string,
     payload?: unknown,
   ): Promise<Record<string, unknown>>;
+  /** 心情：按群读取/重置 */
+  mood(groupId: string, action: 'get' | 'reset'): Promise<Record<string, unknown>>;
   /** 插件卸载时调用 */
   dispose(): Promise<void>;
   /** 当前是否在跑 */
@@ -264,6 +266,17 @@ export function createQqHost(deps: QqHostDeps): QqHost {
           return bridge.deleteMemoryV3(groupId, typeof patch.id === 'string' ? patch.id : '');
         }
         return { ok: true, ...(await bridge.compressMemoryNow(groupId)) };
+      } catch (e) {
+        return { ok: false, message: e instanceof Error ? e.message : String(e) };
+      }
+    },
+
+    /** 心情：按群读取/重置（桥未启动时明确失败） */
+    async mood(groupId: string, action: 'get' | 'reset'): Promise<Record<string, unknown>> {
+      if (bridge === undefined) return { ok: false, message: 'QQ 连接尚未启动' };
+      if (groupId.trim() === '') return { ok: false, message: '缺少 groupId' };
+      try {
+        return action === 'reset' ? bridge.resetMood(groupId) : bridge.moodSnapshot(groupId);
       } catch (e) {
         return { ok: false, message: e instanceof Error ? e.message : String(e) };
       }
