@@ -84,6 +84,9 @@ export type ScoreRules = {
   nightPenalty: number;
   /** 评分权重（缺省用 DEFAULT_SCORE_WEIGHTS） */
   weights?: ScoreWeights;
+  /** 主人/白名单初始好感（画像规则） */
+  initialOwnerAffinity?: number;
+  initialWhitelistAffinity?: number;
 };
 
 /** 关键词匹配：中文直接包含；纯英文按单词边界（避免 "ai" 命中 "said"） */

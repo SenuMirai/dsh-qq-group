@@ -632,7 +632,12 @@ export class QqBridge {
       (asksToSeeImage(message.text) || /^(看看|看下|看一下|瞅瞅|瞧瞧)$/.test(message.text.trim()));
     // 画像：所有开启群里的发言都记；主人初始 +60，白名单 +20
     const userRules = this.deps.rules?.(userId);
-    const initialAffinity = userRules?.owner === true ? 60 : userRules?.whitelist === true ? 20 : 0;
+    const initialAffinity =
+      userRules?.owner === true
+        ? userRules.initialOwnerAffinity ?? 60
+        : userRules?.whitelist === true
+          ? userRules.initialWhitelistAffinity ?? 20
+          : 0;
     this.deps.profiles?.touch(groupId, userId, name, {
       mention: trigger === 'at' || trigger === 'call' || imageRequest,
       initialAffinity,

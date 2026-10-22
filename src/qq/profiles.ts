@@ -23,7 +23,65 @@ export interface DayStats {
   mentionGain: number;
   replyGain: number;
   affGain: number;
+  /** v0.2.2：按项目分开的好感度日增量，便于独立上限 */
+  replyAffGain?: number;
+  continuationAffGain?: number;
+  quoteAffGain?: number;
+  hostilityLoss?: number;
 }
+
+/** 熟识度/好感度的全部增减规则；0 表示该项每日不设上限（初始值除外） */
+export interface ProfileRules {
+  firstMessageFam: number;
+  repeatMessageFam: number;
+  messageFamDailyCap: number;
+  mentionFam: number;
+  mentionFamDailyCap: number;
+  replyFam: number;
+  replyFamDailyCap: number;
+  replyAffinity: number;
+  replyAffinityDailyCap: number;
+  continuationAffinity: number;
+  continuationAffinityDailyCap: number;
+  quoteAffinity: number;
+  quoteAffinityDailyCap: number;
+  hostilityMildLoss: number;
+  hostilitySevereLoss: number;
+  hostilityDailyCap: number;
+  inactiveDaysBeforeFamDecay: number;
+  famDecayPerWeek: number;
+  famDecayFloor: number;
+  inactiveDaysBeforeAffinityDecay: number;
+  affinityDecayPerWeek: number;
+  initialOwnerAffinity: number;
+  initialWhitelistAffinity: number;
+}
+
+export const DEFAULT_PROFILE_RULES: ProfileRules = {
+  firstMessageFam: 2,
+  repeatMessageFam: 0.1,
+  messageFamDailyCap: 4,
+  mentionFam: 1,
+  mentionFamDailyCap: 3,
+  replyFam: 0.5,
+  replyFamDailyCap: 3,
+  replyAffinity: 1,
+  replyAffinityDailyCap: 5,
+  continuationAffinity: 2,
+  continuationAffinityDailyCap: 6,
+  quoteAffinity: 1,
+  quoteAffinityDailyCap: 5,
+  hostilityMildLoss: 2,
+  hostilitySevereLoss: 4,
+  hostilityDailyCap: 0,
+  inactiveDaysBeforeFamDecay: 14,
+  famDecayPerWeek: 10,
+  famDecayFloor: 1,
+  inactiveDaysBeforeAffinityDecay: 7,
+  affinityDecayPerWeek: 1,
+  initialOwnerAffinity: 60,
+  initialWhitelistAffinity: 20,
+};
 
 export interface UserProfile {
   qq: string;
@@ -115,26 +173,57 @@ function today(): string {
 
 function dayStatsFor(profile: UserProfile, day: string): DayStats {
   if (profile.dayStats === undefined || profile.dayStats.day !== day) {
-    profile.dayStats = { day, messages: 0, famGain: 0, mentionGain: 0, replyGain: 0, affGain: 0 };
+    profile.dayStats = {
+      day,
+      messages: 0,
+      famGain: 0,
+      mentionGain: 0,
+      replyGain: 0,
+      affGain: 0,
+      replyAffGain: 0,
+      continuationAffGain: 0,
+      quoteAffGain: 0,
+      hostilityLoss: 0,
+    };
   }
-  return profile.dayStats;
+  const stats = profile.dayStats;
+  stats.famGain = Number(stats.famGain) || 0;
+  stats.mentionGain = Number(stats.mentionGain) || 0;
+  stats.replyGain = Number(stats.replyGain) || 0;
+  stats.affGain = Number(stats.affGain) || 0;
+  stats.replyAffGain = Number(stats.replyAffGain) || 0;
+  stats.continuationAffGain = Number(stats.continuationAffGain) || 0;
+  stats.quoteAffGain = Number(stats.quoteAffGain) || 0;
+  stats.hostilityLoss = Number(stats.hostilityLoss) || 0;
+  return stats;
 }
 
-/** 长期不互动：熟识度 14 天后每周 -1；好感度 7 天后每周向 0 靠拢 1 */
-function applyDecay(profile: UserProfile, now: number): void {
+/** 当日上限：cap <= 0 = 不限；返回本次实际可加值 */
+function cappedGain(value: number, cap: number, used: number): number {
+  if (value <= 0) return 0;
+  if (cap <= 0) return value;
+  return Math.min(value, Math.max(0, cap - used));
+}
+
+/** 长期不互动：熟识度/好感度按规则衰减 */
+function applyDecay(profile: UserProfile, now: number, rules: ProfileRules = DEFAULT_PROFILE_RULES): void {
   if (profile.lastSeen <= 0) return;
   const base = Math.max(profile.lastSeen, profile.decayedThrough ?? 0);
-  const famStart = Math.max(base, profile.lastSeen + 14 * DAY);
+  const famDays = Math.max(0, rules.inactiveDaysBeforeFamDecay);
+  const famStart = Math.max(base, profile.lastSeen + famDays * DAY);
   const famWeeks = Math.floor((now - famStart) / WEEK);
-  if (famWeeks > 0 && profile.familiarity > 0) {
-    // 14 天不来：每周 -10，最低保留 1（不会归零消失）
-    profile.familiarity = Math.max(1, profile.familiarity - famWeeks * 10);
+  if (famWeeks > 0 && profile.familiarity > 0 && rules.famDecayPerWeek > 0) {
+    profile.familiarity = Math.max(
+      Math.max(0, rules.famDecayFloor),
+      profile.familiarity - famWeeks * rules.famDecayPerWeek,
+    );
   }
-  const affStart = Math.max(base, profile.lastSeen + 7 * DAY);
+  const affDays = Math.max(0, rules.inactiveDaysBeforeAffinityDecay);
+  const affStart = Math.max(base, profile.lastSeen + affDays * DAY);
   const affWeeks = Math.floor((now - affStart) / WEEK);
-  if (affWeeks > 0) {
-    if (profile.affinity > 0) profile.affinity = clamp(profile.affinity - affWeeks, 0, 100);
-    else if (profile.affinity < 0) profile.affinity = clamp(profile.affinity + affWeeks, -100, 0);
+  if (affWeeks > 0 && rules.affinityDecayPerWeek > 0) {
+    if (profile.affinity > 0) profile.affinity = clamp(profile.affinity - affWeeks * rules.affinityDecayPerWeek, 0, 100);
+    else if (profile.affinity < 0) profile.affinity = clamp(profile.affinity + affWeeks * rules.affinityDecayPerWeek, -100, 0);
   }
   profile.decayedThrough = now;
 }
@@ -145,8 +234,9 @@ export function touchUser(
   groupId: string,
   qq: string,
   name: string,
-  options: { mention?: boolean; initialAffinity?: number; now?: number } = {},
+  options: { mention?: boolean; initialAffinity?: number; now?: number; rules?: ProfileRules } = {},
 ): UserProfile {
+  const rules = options.rules ?? DEFAULT_PROFILE_RULES;
   const group = (profiles.groups[groupId] ??= { users: {} });
   const now = options.now ?? Date.now();
   let profile = group.users[qq];
@@ -164,8 +254,8 @@ export function touchUser(
     };
     group.users[qq] = profile;
   }
-  applyDecay(profile, now);
-  // 初次建立/旧数据补齐：主人 +60，白名单 +20
+  applyDecay(profile, now, rules);
+  // 初次建立/旧数据补齐：主人/白名单的初始好感由规则决定
   if (profile.seeded !== true) {
     const initial = clamp(options.initialAffinity ?? 0, -100, 100);
     profile.affinity = Math.max(profile.affinity, initial);
@@ -179,8 +269,8 @@ export function touchUser(
   const stats = dayStatsFor(profile, day);
   stats.messages += 1;
   const firstToday = stats.messages === 1;
-  const remaining = Math.max(0, 4 - stats.famGain);
-  const famGain = Math.min(firstToday ? 2 : 0.1, remaining);
+  const famValue = firstToday ? rules.firstMessageFam : rules.repeatMessageFam;
+  const famGain = cappedGain(famValue, rules.messageFamDailyCap, stats.famGain);
   if (famGain > 0) {
     stats.famGain += famGain;
     profile.familiarity = clamp(profile.familiarity + famGain, 0, 100);
@@ -189,7 +279,7 @@ export function touchUser(
 
   if (options.mention === true) {
     profile.mentions += 1;
-    const mentionGain = Math.min(1, Math.max(0, 3 - stats.mentionGain));
+    const mentionGain = cappedGain(rules.mentionFam, rules.mentionFamDailyCap, stats.mentionGain);
     if (mentionGain > 0) {
       stats.mentionGain += mentionGain;
       profile.familiarity = clamp(profile.familiarity + mentionGain, 0, 100);
@@ -204,19 +294,25 @@ export function touchUser(
   return profile;
 }
 
-/** 她回了这个人：熟识度 +0.5（每日上限 3），好感 +1（每日上限 5） */
-export function noteReply(profiles: ProfileFile, groupId: string, qq: string): UserProfile | undefined {
+/** 她回了这个人 */
+export function noteReply(
+  profiles: ProfileFile,
+  groupId: string,
+  qq: string,
+  rules: ProfileRules = DEFAULT_PROFILE_RULES,
+): UserProfile | undefined {
   const profile = profiles.groups[groupId]?.users[qq];
   if (profile === undefined) return undefined;
-  applyDecay(profile, Date.now());
+  applyDecay(profile, Date.now(), rules);
   const stats = dayStatsFor(profile, today());
-  const famGain = Math.min(0.5, Math.max(0, 3 - stats.replyGain));
+  const famGain = cappedGain(rules.replyFam, rules.replyFamDailyCap, stats.replyGain);
   if (famGain > 0) {
     stats.replyGain += famGain;
     profile.familiarity = clamp(profile.familiarity + famGain, 0, 100);
   }
-  const affGain = Math.min(1, Math.max(0, 5 - stats.affGain));
+  const affGain = cappedGain(rules.replyAffinity, rules.replyAffinityDailyCap, stats.replyAffGain ?? 0);
   if (affGain > 0) {
+    stats.replyAffGain = (stats.replyAffGain ?? 0) + affGain;
     stats.affGain += affGain;
     profile.affinity = clamp(profile.affinity + affGain, -100, 100);
   }
@@ -224,58 +320,85 @@ export function noteReply(profiles: ProfileFile, groupId: string, qq: string): U
   return profile;
 }
 
-/** 你接了她的话（5 分钟内）：好感 +2（每日上限 6） */
-export function noteContinuation(profiles: ProfileFile, groupId: string, qq: string): UserProfile | undefined {
+/** 你接了她的话（5 分钟内） */
+export function noteContinuation(
+  profiles: ProfileFile,
+  groupId: string,
+  qq: string,
+  rules: ProfileRules = DEFAULT_PROFILE_RULES,
+): UserProfile | undefined {
   const profile = profiles.groups[groupId]?.users[qq];
   if (profile === undefined) return undefined;
-  applyDecay(profile, Date.now());
+  applyDecay(profile, Date.now(), rules);
   const stats = dayStatsFor(profile, today());
-  const gain = Math.min(2, Math.max(0, 6 - stats.affGain));
+  const gain = cappedGain(rules.continuationAffinity, rules.continuationAffinityDailyCap, stats.continuationAffGain ?? 0);
   if (gain > 0) {
+    stats.continuationAffGain = (stats.continuationAffGain ?? 0) + gain;
     stats.affGain += gain;
     profile.affinity = clamp(profile.affinity + gain, -100, 100);
   }
   return profile;
 }
 
-/** 引用回复她：好感 +1（计入每日好感上限） */
-export function noteQuote(profiles: ProfileFile, groupId: string, qq: string): UserProfile | undefined {
+/** 引用回复她 */
+export function noteQuote(
+  profiles: ProfileFile,
+  groupId: string,
+  qq: string,
+  rules: ProfileRules = DEFAULT_PROFILE_RULES,
+): UserProfile | undefined {
   const profile = profiles.groups[groupId]?.users[qq];
   if (profile === undefined) return undefined;
-  applyDecay(profile, Date.now());
+  applyDecay(profile, Date.now(), rules);
   const stats = dayStatsFor(profile, today());
-  const gain = Math.min(1, Math.max(0, 5 - stats.affGain));
+  const gain = cappedGain(rules.quoteAffinity, rules.quoteAffinityDailyCap, stats.quoteAffGain ?? 0);
   if (gain > 0) {
+    stats.quoteAffGain = (stats.quoteAffGain ?? 0) + gain;
     stats.affGain += gain;
     profile.affinity = clamp(profile.affinity + gain, -100, 100);
   }
   return profile;
 }
 
-/** 模型判定「在怼她」：severity 1 → -2，2 → -4 */
+/** 模型判定「在怼她」 */
 export function noteHostility(
   profiles: ProfileFile,
   groupId: string,
   qq: string,
   severity: number,
+  rules: ProfileRules = DEFAULT_PROFILE_RULES,
 ): UserProfile | undefined {
   const profile = profiles.groups[groupId]?.users[qq];
   if (profile === undefined) return undefined;
-  applyDecay(profile, Date.now());
-  const loss = severity >= 2 ? 4 : 2;
-  profile.affinity = clamp(profile.affinity - loss, -100, 100);
+  applyDecay(profile, Date.now(), rules);
+  const stats = dayStatsFor(profile, today());
+  const baseLoss = severity >= 2 ? rules.hostilitySevereLoss : rules.hostilityMildLoss;
+  const loss = cappedGain(baseLoss, rules.hostilityDailyCap, stats.hostilityLoss ?? 0);
+  if (loss > 0) {
+    stats.hostilityLoss = (stats.hostilityLoss ?? 0) + loss;
+    profile.affinity = clamp(profile.affinity - loss, -100, 100);
+  }
   return profile;
 }
 
-export function getProfile(profiles: ProfileFile, groupId: string, qq: string): UserProfile | undefined {
+export function getProfile(
+  profiles: ProfileFile,
+  groupId: string,
+  qq: string,
+  rules: ProfileRules = DEFAULT_PROFILE_RULES,
+): UserProfile | undefined {
   const profile = profiles.groups[groupId]?.users[qq];
-  if (profile !== undefined) applyDecay(profile, Date.now());
+  if (profile !== undefined) applyDecay(profile, Date.now(), rules);
   return profile;
 }
 
-export function listProfiles(profiles: ProfileFile, groupId: string): UserProfile[] {
+export function listProfiles(
+  profiles: ProfileFile,
+  groupId: string,
+  rules: ProfileRules = DEFAULT_PROFILE_RULES,
+): UserProfile[] {
   const users = profiles.groups[groupId]?.users ?? {};
   const now = Date.now();
-  for (const profile of Object.values(users)) applyDecay(profile, now);
+  for (const profile of Object.values(users)) applyDecay(profile, now, rules);
   return Object.values(users).sort((a, b) => b.familiarity - a.familiarity || b.affinity - a.affinity);
 }

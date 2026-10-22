@@ -44,6 +44,8 @@ import {
   readProfiles,
   touchUser,
   writeProfiles,
+  DEFAULT_PROFILE_RULES,
+  type ProfileRules,
   type ProfileFile,
 } from './qq/profiles';
 import { createQqHost, qqConfigPath, readQqConfig } from './qq-host';
@@ -104,6 +106,8 @@ type Settings = {
   nightPenalty: number;
   /** 价值评分的全部权重 */
   scoreWeights: ScoreWeights;
+  /** 熟识度/好感度的全部增减规则 */
+  profileRules: ProfileRules;
   /** 被怼/嘲讽时让模型判断并扣好感 */
   hostilityJudge: boolean;
   /** DSH 退出后自动清理认证 cookie（Windows；阈值 20） */
@@ -142,6 +146,7 @@ const DEFAULT_SETTINGS: Settings = {
   nightDnd: { enabled: true, startHour: 23, endHour: 8 },
   nightPenalty: 20,
   scoreWeights: { ...DEFAULT_SCORE_WEIGHTS },
+  profileRules: { ...DEFAULT_PROFILE_RULES },
   hostilityJudge: true,
   cookieWatch: true,
   customVoices: [],
@@ -186,6 +191,17 @@ function readSettings(root: string): Settings {
         shortMessagePenalty: pick('shortMessagePenalty', DEFAULT_SCORE_WEIGHTS.shortMessagePenalty),
         shortMessageChars: pick('shortMessageChars', DEFAULT_SCORE_WEIGHTS.shortMessageChars, 0, 100),
       };
+    };
+    const profileRules = (value: unknown): ProfileRules => {
+      const src = value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+      const out: ProfileRules = { ...DEFAULT_PROFILE_RULES };
+      for (const key of Object.keys(DEFAULT_PROFILE_RULES) as Array<keyof ProfileRules>) {
+        const candidate = src[key];
+        if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+          out[key] = Math.min(1000, Math.max(0, candidate));
+        }
+      }
+      return out;
     };
     const nightRaw = raw.nightDnd;
     const night =
@@ -234,6 +250,7 @@ function readSettings(root: string): Settings {
       nightDnd: night,
       nightPenalty: number(raw.nightPenalty, DEFAULT_SETTINGS.nightPenalty, 0, 100),
       scoreWeights: scoreWeights(raw.scoreWeights),
+      profileRules: profileRules(raw.profileRules),
       hostilityJudge: raw.hostilityJudge !== false,
       cookieWatch: raw.cookieWatch !== false,
       customVoices: Array.isArray(raw.customVoices)
@@ -360,31 +377,32 @@ export function apply(ctx: any): void {
     }, 1500);
     profileSaveTimer.unref?.();
   };
+  const profileRulesNow = (): ProfileRules => readSettings(root).profileRules;
   const profileStore: ProfileStore = {
     touch: (groupId, qq, name, options) => {
       if (qq === '') return;
-      touchUser(profiles, groupId, qq, name, options ?? {});
+      touchUser(profiles, groupId, qq, name, { ...(options ?? {}), rules: profileRulesNow() });
       saveProfilesSoon();
     },
-    get: (groupId, qq) => (qq === '' ? undefined : getProfile(profiles, groupId, qq)),
+    get: (groupId, qq) => (qq === '' ? undefined : getProfile(profiles, groupId, qq, profileRulesNow())),
     noteReply: (groupId, qq) => {
       if (qq === '') return;
-      noteProfileReply(profiles, groupId, qq);
+      noteProfileReply(profiles, groupId, qq, profileRulesNow());
       saveProfilesSoon();
     },
     noteContinuation: (groupId, qq) => {
       if (qq === '') return;
-      noteContinuation(profiles, groupId, qq);
+      noteContinuation(profiles, groupId, qq, profileRulesNow());
       saveProfilesSoon();
     },
     noteQuote: (groupId, qq) => {
       if (qq === '') return;
-      noteQuote(profiles, groupId, qq);
+      noteQuote(profiles, groupId, qq, profileRulesNow());
       saveProfilesSoon();
     },
     noteHostility: (groupId, qq, severity) => {
       if (qq === '') return;
-      noteHostility(profiles, groupId, qq, severity);
+      noteHostility(profiles, groupId, qq, severity, profileRulesNow());
       saveProfilesSoon();
     },
   };
@@ -397,7 +415,12 @@ export function apply(ctx: any): void {
     for (const group of Object.values(profiles.groups)) {
       for (const profile of Object.values(group.users)) {
         if (profile.seeded === true) continue;
-        const initial = profile.qq === cfg.ownerQq ? 60 : settings.whitelist.includes(profile.qq) ? 20 : 0;
+        const initial =
+          profile.qq === cfg.ownerQq
+            ? settings.profileRules.initialOwnerAffinity
+            : settings.whitelist.includes(profile.qq)
+              ? settings.profileRules.initialWhitelistAffinity
+              : 0;
         profile.affinity = Math.max(profile.affinity, initial);
         profile.seeded = true;
         changed = true;
@@ -428,6 +451,8 @@ export function apply(ctx: any): void {
       night: isNightNow(),
       nightPenalty: settings.nightPenalty,
       weights: settings.scoreWeights,
+      initialOwnerAffinity: settings.profileRules.initialOwnerAffinity,
+      initialWhitelistAffinity: settings.profileRules.initialWhitelistAffinity,
     };
   };
 
@@ -1042,7 +1067,7 @@ export function apply(ctx: any): void {
         const userFilter = url.searchParams.get('userId') ?? '';
 
         if (rest === 'diary/members' && method === 'GET') {
-          const members = listProfiles(profiles, groupFilter).map((p) => ({
+          const members = listProfiles(profiles, groupFilter, readSettings(root).profileRules).map((p) => ({
             qq: p.qq,
             name: p.name,
             familiarity: Math.round(p.familiarity),
@@ -1348,6 +1373,21 @@ export function apply(ctx: any): void {
                 const value = input[key];
                 if (typeof value === 'number' && Number.isFinite(value)) {
                   out[key] = Math.min(key === 'shortMessageChars' ? 100 : key === 'base' ? 100 : 1000, Math.max(0, Math.round(value)));
+                }
+              }
+              return out;
+            })(),
+            profileRules: (() => {
+              const input =
+                patch.settings.profileRules !== null && typeof patch.settings.profileRules === 'object'
+                  ? (patch.settings.profileRules as Record<string, unknown>)
+                  : undefined;
+              if (input === undefined) return current.profileRules;
+              const out: ProfileRules = { ...current.profileRules };
+              for (const key of Object.keys(DEFAULT_PROFILE_RULES) as Array<keyof ProfileRules>) {
+                const value = input[key];
+                if (typeof value === 'number' && Number.isFinite(value)) {
+                  out[key] = Math.min(1000, Math.max(0, value));
                 }
               }
               return out;

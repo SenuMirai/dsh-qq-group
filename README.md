@@ -191,6 +191,16 @@ DSH 设置 →「QQ 群聊」→「连接」：
 
 
 
+
+
+### v0.2.2 用户画像
+
+- 「名单」Tab 改名「用户画像」，熟识度/好感度相关设置全部集中到这里。
+- 可调项目：首次/后续发言、被点名、她回复、接话、引用、敌意扣分、长期不互动衰减、主人/白名单初始好感。
+- 每项都有独立每日上限，填 0 = 不限；支持小数。
+- 增加关系语气说明卡片：明确各熟识度/好感度区间的语气差异。
+- 关系评分加成上限也移到「用户画像」。
+
 ### v0.2.1 新增
 
 - **关系语气生效**：熟识度/好感度现在会生成明确的语气指令（陌生→很熟、反感→亲近），不只是数字。
@@ -396,6 +406,16 @@ Each project keeps its own license; this project borrows design ideas only and d
 
 
 
+
+
+
+### v0.2.2 User profiles
+
+- Renamed the "Lists" tab to "User Profiles"; all familiarity/affinity settings live there.
+- Editable: first/subsequent messages, mentions, replies, continuations, quotes, hostility loss, inactivity decay, initial owner/whitelist affinity.
+- Each item has its own daily cap; 0 = unlimited; decimals supported.
+- Added a relationship-tone explanation card for each familiarity/affinity band.
+- Relationship score caps moved to User Profiles.
 
 ### v0.2.1 additions
 
