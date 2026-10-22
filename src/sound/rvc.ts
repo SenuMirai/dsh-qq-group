@@ -39,6 +39,14 @@ export function createCommandRvcConverter(config: RvcWorkerConfig): RvcConverter
         return { ok: false, reason: 'not-configured', message: 'RVC worker 或模型路径没有配置' };
       }
       if (wav.byteLength === 0) return { ok: false, reason: 'failed', message: 'RVC 输入音频为空' };
+      const duration = wavDurationSeconds(wav);
+      if (duration !== undefined && config.maxSeconds > 0 && duration > config.maxSeconds) {
+        return {
+          ok: false,
+          reason: 'failed',
+          message: `RVC 输入 ${duration.toFixed(1)} 秒，超过上限 ${config.maxSeconds} 秒`,
+        };
+      }
       const dir = mkdtempSync(join(tmpdir(), 'qq-rvc-'));
       const input = join(dir, 'input.wav');
       const output = join(dir, 'output.wav');
@@ -74,13 +82,37 @@ export function createCommandRvcConverter(config: RvcWorkerConfig): RvcConverter
   };
 }
 
+/** 读 RIFF/WAVE 的时长；结构不标准就返回 undefined，不阻止转换 */
+function wavDurationSeconds(wav: Uint8Array): number | undefined {
+  if (wav.byteLength < 44) return undefined;
+  const view = new DataView(wav.buffer, wav.byteOffset, wav.byteLength);
+  if (view.getUint32(0, false) !== 0x52494646 || view.getUint32(8, false) !== 0x57415645) return undefined;
+  let offset = 12;
+  let sampleRate = 0;
+  let blockAlign = 0;
+  let dataSize = 0;
+  while (offset + 8 <= wav.byteLength) {
+    const id = view.getUint32(offset, false);
+    const size = view.getUint32(offset + 4, true);
+    if (id === 0x666d7420 && offset + 16 <= wav.byteLength) {
+      sampleRate = view.getUint32(offset + 12, true);
+      blockAlign = view.getUint16(offset + 20, true);
+    } else if (id === 0x64617461) {
+      dataSize = size;
+      break;
+    }
+    offset += 8 + size + (size % 2);
+  }
+  if (sampleRate <= 0 || blockAlign <= 0 || dataSize <= 0) return undefined;
+  return dataSize / (sampleRate * blockAlign);
+}
+
 function runWorker(
   python: string,
   args: string[],
   timeoutMs: number,
   signal?: AbortSignal,
-): Promise<{ ok: true } | { ok: false; reason: 'timeout' | 'failed'; message: string }> {
-  return new Promise((resolve) => {
+): Promise<{ ok: true } | { ok: false; reason: 'timeout' | 'failed'; message: string }> {  return new Promise((resolve) => {
     const child = spawn(python, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let stderr = '';
     let settled = false;

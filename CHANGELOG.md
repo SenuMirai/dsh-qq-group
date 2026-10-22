@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 1.8.1 — RVC 时长上限生效
+
+- RVC 转换前读取 WAV 时长；超过配置的「最长音频」直接拒绝并回退原音。
+- 避免长歌/长语音误送进 worker 造成超时或显存峰值。
+
 ## 1.8.0 — RVC 外部 worker 接口
 
 - 新增可选 RVC：edge-tts 干音 → 外部 Python worker → 变声 WAV → QQ 语音。
