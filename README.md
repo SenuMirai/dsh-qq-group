@@ -189,6 +189,15 @@ DSH 设置 →「QQ 群聊」→「连接」：
 
 
 
+
+
+### v0.2.1 新增
+
+- **关系语气生效**：熟识度/好感度现在会生成明确的语气指令（陌生→很熟、反感→亲近），不只是数字。
+- **评分全参数可调**：基础分（默认降到 15）、关键词/成员倍率、连续对话加成、@/引用/被冷落/单条/短消息扣分、关系加成上限、短消息字数。
+- **明确看图请求**：带图消息里说“看看/看一下/这张图/照片/这猫可爱吗”，即使没 @、没叫名字，也按直接对话读图。
+- **语音概率**：独立掷骰，不再依赖模型主动选 voice。
+
 ### v0.2 新增
 
 - **表情包多仓库**：inbox / common / 自建仓库；每个仓库有发送权重（0 = 只手动用）、启用状态、默认入库设置；旧素材自动迁移到 common。
@@ -385,6 +394,15 @@ Each project keeps its own license; this project borrows design ideas only and d
 - Follow QQ rules and group rules; do not use for harassment, spam or unauthorized automation.
 
 
+
+
+
+### v0.2.1 additions
+
+- **Relationship tone now takes effect**: familiarity/affinity produce explicit tone directives (stranger → very familiar, dislike → close), not just numbers.
+- **All score parameters editable**: base (default lowered to 15), keyword/member multipliers, continuation bonuses, @/quote/ignored/single/short-message penalties, relationship caps and short-message threshold.
+- **Explicit image requests**: with an image, “look at this / this photo / is this cat cute” is treated as a direct request even without @ or name.
+- **Voice probability**: independent roll, no longer dependent on the model choosing voice.
 
 ### v0.2 additions
 

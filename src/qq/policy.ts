@@ -236,6 +236,15 @@ export function hasSubstantiveText(text: string): boolean {
   return stripped.length > 0;
 }
 
+/** 群友是否在明确让她看/评价图片（仅在消息真的带图时使用） */
+export function asksToSeeImage(text: string): boolean {
+  const value = text.trim();
+  if (value === '') return false;
+  const mentionsImage = /图|图片|照片|截图|表情包|画面|这张|这个|这猫|这狗|这画|这人/.test(value);
+  const asks = /看看|看一下|看下|瞅瞅|瞧瞧|评价|觉得|可爱|好看|怎么样|如何|是什么|啥|谁|认得出|看得见/.test(value);
+  return mentionsImage && asks;
+}
+
 /** 文本里有没有叫到她的名字（支持多个名字，逗号/顿号/斜杠分隔） */
 export function mentionedByName(text: string, botName: string): boolean {
   const names = botName

@@ -33,7 +33,7 @@ import {
   updateStickerMeta,
   updateStickerRepos,
 } from './qq/stickers';
-import type { ScoreRules } from './qq/triggers';
+import { DEFAULT_SCORE_WEIGHTS, type ScoreRules, type ScoreWeights } from './qq/triggers';
 import {
   getProfile,
   listProfiles,
@@ -102,6 +102,8 @@ type Settings = {
   nightDnd: { enabled: boolean; startHour: number; endHour: number };
   /** 夜间命中时从价值评分里扣多少分 */
   nightPenalty: number;
+  /** 价值评分的全部权重 */
+  scoreWeights: ScoreWeights;
   /** 被怼/嘲讽时让模型判断并扣好感 */
   hostilityJudge: boolean;
   /** DSH 退出后自动清理认证 cookie（Windows；阈值 20） */
@@ -132,13 +134,14 @@ const DEFAULT_SETTINGS: Settings = {
   stickerMaxMB: 200,
   autoStart: true,
   autoLaunchNapcat: true,
-  napcatLauncher: 'C:\\DSHwork\\start-napcat.bat',
+  napcatLauncher: '',
   whitelist: [],
   whitelistFloor: 95,
   blacklist: [],
   blacklistCeil: 5,
   nightDnd: { enabled: true, startHour: 23, endHour: 8 },
   nightPenalty: 20,
+  scoreWeights: { ...DEFAULT_SCORE_WEIGHTS },
   hostilityJudge: true,
   cookieWatch: true,
   customVoices: [],
@@ -160,6 +163,30 @@ function readSettings(root: string): Settings {
       Array.isArray(value)
         ? value.filter((item): item is string => typeof item === 'string' && /^\d{5,12}$/.test(item.trim())).map((item) => item.trim())
         : [];
+    const scoreWeights = (value: unknown): ScoreWeights => {
+      const src = value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+      const pick = (key: keyof ScoreWeights, fallback: number, min = 0, max = 1000): number =>
+        typeof src[key] === 'number' && Number.isFinite(src[key] as number)
+          ? Math.min(max, Math.max(min, Math.round(src[key] as number)))
+          : fallback;
+      return {
+        base: pick('base', DEFAULT_SCORE_WEIGHTS.base, 0, 100),
+        keywordMultiplier: pick('keywordMultiplier', DEFAULT_SCORE_WEIGHTS.keywordMultiplier),
+        memberMultiplier: pick('memberMultiplier', DEFAULT_SCORE_WEIGHTS.memberMultiplier),
+        sameSpeaker: pick('sameSpeaker', DEFAULT_SCORE_WEIGHTS.sameSpeaker),
+        continuation: pick('continuation', DEFAULT_SCORE_WEIGHTS.continuation),
+        directContinuation: pick('directContinuation', DEFAULT_SCORE_WEIGHTS.directContinuation),
+        secondPerson: pick('secondPerson', DEFAULT_SCORE_WEIGHTS.secondPerson),
+        atOtherPenalty: pick('atOtherPenalty', DEFAULT_SCORE_WEIGHTS.atOtherPenalty),
+        replyOtherPenalty: pick('replyOtherPenalty', DEFAULT_SCORE_WEIGHTS.replyOtherPenalty),
+        familiarityMax: pick('familiarityMax', DEFAULT_SCORE_WEIGHTS.familiarityMax),
+        affinityMax: pick('affinityMax', DEFAULT_SCORE_WEIGHTS.affinityMax),
+        ignoredPenalty: pick('ignoredPenalty', DEFAULT_SCORE_WEIGHTS.ignoredPenalty),
+        singleMessagePenalty: pick('singleMessagePenalty', DEFAULT_SCORE_WEIGHTS.singleMessagePenalty),
+        shortMessagePenalty: pick('shortMessagePenalty', DEFAULT_SCORE_WEIGHTS.shortMessagePenalty),
+        shortMessageChars: pick('shortMessageChars', DEFAULT_SCORE_WEIGHTS.shortMessageChars, 0, 100),
+      };
+    };
     const nightRaw = raw.nightDnd;
     const night =
       nightRaw !== null && typeof nightRaw === 'object'
@@ -206,6 +233,7 @@ function readSettings(root: string): Settings {
       blacklistCeil: number(raw.blacklistCeil, DEFAULT_SETTINGS.blacklistCeil, 0, 100),
       nightDnd: night,
       nightPenalty: number(raw.nightPenalty, DEFAULT_SETTINGS.nightPenalty, 0, 100),
+      scoreWeights: scoreWeights(raw.scoreWeights),
       hostilityJudge: raw.hostilityJudge !== false,
       cookieWatch: raw.cookieWatch !== false,
       customVoices: Array.isArray(raw.customVoices)
@@ -399,6 +427,7 @@ export function apply(ctx: any): void {
       blacklistCeil: settings.blacklistCeil,
       night: isNightNow(),
       nightPenalty: settings.nightPenalty,
+      weights: settings.scoreWeights,
     };
   };
 
@@ -1308,6 +1337,21 @@ export function apply(ctx: any): void {
               typeof patch.settings.nightPenalty === 'number'
                 ? Math.min(100, Math.max(0, Math.round(patch.settings.nightPenalty)))
                 : current.nightPenalty,
+            scoreWeights: (() => {
+              const input =
+                patch.settings.scoreWeights !== null && typeof patch.settings.scoreWeights === 'object'
+                  ? (patch.settings.scoreWeights as Record<string, unknown>)
+                  : undefined;
+              if (input === undefined) return current.scoreWeights;
+              const out: ScoreWeights = { ...current.scoreWeights };
+              for (const key of Object.keys(DEFAULT_SCORE_WEIGHTS) as Array<keyof ScoreWeights>) {
+                const value = input[key];
+                if (typeof value === 'number' && Number.isFinite(value)) {
+                  out[key] = Math.min(key === 'shortMessageChars' ? 100 : key === 'base' ? 100 : 1000, Math.max(0, Math.round(value)));
+                }
+              }
+              return out;
+            })(),
             hostilityJudge:
               typeof patch.settings.hostilityJudge === 'boolean'
                 ? patch.settings.hostilityJudge

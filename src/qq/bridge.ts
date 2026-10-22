@@ -47,6 +47,7 @@ import {
 import { OneBotClient, asId, parseMessage } from './onebot';
 import {
   CHAT_DEBOUNCE_MS,
+  asksToSeeImage,
   burstGap,
   chatWindowElapsed,
   classifyTrigger,
@@ -624,18 +625,23 @@ export class QqBridge {
     }
 
     const trigger = classifyTrigger(message, policy, this.config.selfName);
+    // 明确让她看图：即使没 @ / 没叫名字，也按直接对话处理
+    const imageRequest =
+      message.hasImage &&
+      policy.imageView !== 'off' &&
+      (asksToSeeImage(message.text) || /^(看看|看下|看一下|瞅瞅|瞧瞧)$/.test(message.text.trim()));
     // 画像：所有开启群里的发言都记；主人初始 +60，白名单 +20
     const userRules = this.deps.rules?.(userId);
     const initialAffinity = userRules?.owner === true ? 60 : userRules?.whitelist === true ? 20 : 0;
     this.deps.profiles?.touch(groupId, userId, name, {
-      mention: trigger === 'at' || trigger === 'call',
+      mention: trigger === 'at' || trigger === 'call' || imageRequest,
       initialAffinity,
     });
     // 引用回复她刚才那条消息 = 明确在跟她说话（比 @ 还准）
     const repliedToSelf =
       message.replyToId !== undefined && this.selfMessageIds.get(groupId)?.has(message.replyToId) === true;
     if (repliedToSelf) this.deps.profiles?.noteQuote(groupId, userId);
-    if (trigger === 'none' && !repliedToSelf) return;
+    if (trigger === 'none' && !repliedToSelf && !imageRequest) return;
 
     // 让模型判断「这条是不是在怼她」，异步扣好感，不挡回复。
     // 只对直接对她说、或明显在聊她/DeepSeek 的消息跑，避免每条都多花一次调用。
@@ -649,7 +655,7 @@ export class QqBridge {
 
     // @ 与叫名字 / 引用她：立刻回（不受去抖窗口影响，但受冷却/限流约束）
     // 「叫名字」在提示词里与 @ 同一档：都是明确的「在跟你说话」
-    if (trigger === 'at' || trigger === 'call' || repliedToSelf) {
+    if (trigger === 'at' || trigger === 'call' || repliedToSelf || imageRequest) {
       clearChatWindow(state);
       this.pendingTexts.delete(groupId);
       this.pendingAtOther.delete(groupId);
@@ -938,6 +944,8 @@ export class QqBridge {
     mode: SpeakMode,
   ): boolean {
     if (message === undefined || message.images.length === 0 || policy.imageView === 'off') return false;
+    // 明确让她看/评价图片时，即使没有 @ 也算强相关；只有手动选了 off 才关
+    if (asksToSeeImage(message.text) || /^(看看|看下|看一下|瞅瞅|瞧瞧)$/.test(message.text.trim())) return true;
     if (policy.imageView === 'all') return true;
     const modes = policy.imageViewModes;
     if (modes.includes('at') && mode === 'at') return true;
@@ -1032,10 +1040,30 @@ export class QqBridge {
       const turns = recentTurns(group, Math.max(1, policy.contextTurns || CONTEXT_TURNS));
       const speakerId = message?.userId ?? this.lastSpeaker.get(groupId) ?? '';
       const speakerProfile = speakerId === '' ? undefined : this.deps.profiles?.get(groupId, speakerId);
+      const familiarity = speakerProfile === undefined ? 0 : Math.round(speakerProfile.familiarity);
+      const affinity = speakerProfile === undefined ? 0 : Math.round(speakerProfile.affinity);
+      const familiarityTone =
+        familiarity < 20
+          ? '陌生：保持礼貌和距离，不要套近乎、不要主动损人。'
+          : familiarity < 45
+            ? '认识：正常友好，可以接梗，但别装得很熟。'
+            : familiarity < 75
+              ? '熟悉：可以自然调侃、用昵称、主动关心，语气放松。'
+              : '很熟：可以互损、撒娇、吐槽，但仍要看场合；不要对所有人都这样。';
+      const affinityTone =
+        affinity <= -30
+          ? '反感：回复冷淡、简短，不主动帮忙、不撒娇、不讨好；但不要辱骂或阴阳。'
+          : affinity < 0
+            ? '略疏远：客气、克制，少开玩笑。'
+            : affinity < 30
+              ? '普通：正常交流，不额外热情。'
+              : affinity < 60
+                ? '有好感：温和、愿意接话、适度关心。'
+                : '亲近：明显更耐心、更关心、更愿意解释；可以有一点偏爱，但不要无脑舔。';
       const profileNote =
         speakerProfile === undefined
           ? ''
-          : `\n\n【你对 ${speakerProfile.name || speakerProfile.qq} 的印象】熟识度 ${Math.round(speakerProfile.familiarity)}/100，好感度 ${Math.round(speakerProfile.affinity)}（-100~100）。熟识度高可以更随便一点，好感度低也不用冷落或阴阳；这些数字只影响你的语气，别念出来。`;
+          : `\n\n【关系与语气（只影响语气，不要把数字念出来）】\n对方：${speakerProfile.name || speakerProfile.qq}；熟识度 ${familiarity}/100（${familiarityTone}）\n好感度 ${affinity}（-100~100，${affinityTone}）\n请按这个关系调整称呼、玩笑尺度、耐心和主动关心的程度。`;
       const summaryNote =
         group.summary === undefined || group.summary === ''
           ? ''
