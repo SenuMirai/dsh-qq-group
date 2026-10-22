@@ -33,6 +33,14 @@ import {
   updateStickerMeta,
   updateStickerRepos,
 } from './qq/stickers';
+import {
+  createSelfieHub,
+  deleteSelfie,
+  listSelfies,
+  saveSelfie,
+  selfieDir,
+  selfieFile,
+} from './qq/selfies';
 import { DEFAULT_SCORE_WEIGHTS, type ScoreRules, type ScoreWeights } from './qq/triggers';
 import {
   getProfile,
@@ -350,7 +358,7 @@ export function apply(ctx: any): void {
 
   // Cookie 清理不放在插件进程里：Chromium 运行期间独占锁住 Cookie 库，
   // 而且插件本身随 host 一起退出，清理必须由独立的系统级看门狗完成。
-  // 生产环境请由独立脚本/计划任务完成；插件本身不负责系统级清理。
+  // 生产环境请由独立脚本/计划任务做系统级清理；插件本身不负责。
 
   let previewSpeaker: Speaker | undefined;
   const getPreviewSpeaker = (): Speaker => {
@@ -788,6 +796,7 @@ export function apply(ctx: any): void {
       log: (message) => console.warn(`[dsh-qq-group] ${message}`),
     }),
     stickerSaveEnabled: () => readSettings(root).stickerSave,
+    selfies: createSelfieHub(root),
     onDiary: (entry) => {
       try {
         appendDiary(root, entry);
@@ -1132,6 +1141,53 @@ export function apply(ctx: any): void {
           return send(200, { ok: true, entries: page, total: filtered.length, hasMore: filtered.length > page.length });
         }
 
+        return send(405, { error: 'method not allowed' });
+      }
+
+      if (rest === 'selfies' || rest === 'selfies/file' || rest === 'selfies/upload' || rest === 'selfies/delete' || rest === 'selfies/open') {
+        if (rest === 'selfies/file' && method === 'GET') {
+          const name = url.searchParams.get('name') ?? '';
+          const path = selfieFile(root, name);
+          if (path === undefined) return send(404, { ok: false, message: 'not found' });
+          const ext = extname(path).toLowerCase();
+          const mime = ext === '.png' ? 'image/png' : ext === '.gif' ? 'image/gif' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+          res.writeHead(200, { 'content-type': mime, 'cache-control': 'no-store' });
+          res.end(readFileSync(path));
+          return;
+        }
+        if (rest === 'selfies/open' && method === 'POST') {
+          if (process.platform !== 'win32') return send(200, { ok: false, message: '只有 Windows 支持直接打开文件夹' });
+          const dir = selfieDir(root);
+          mkdirSync(dir, { recursive: true });
+          spawn('explorer.exe', [dir], { detached: true, stdio: 'ignore' }).unref();
+          return send(200, { ok: true, path: dir });
+        }
+        if (rest === 'selfies/upload' && method === 'POST') {
+          try {
+            const parsed = JSON.parse(body || 'null') as { name?: unknown; data?: unknown } | null;
+            const name = typeof parsed?.name === 'string' ? parsed.name : '';
+            const data = typeof parsed?.data === 'string' ? parsed.data.replace(/^data:[^;]+;base64,/, '') : '';
+            if (name === '' || data === '') return send(200, { ok: false, message: '缺少文件名或图片数据' });
+            const item = saveSelfie(root, name, Buffer.from(data, 'base64'));
+            return send(200, item === undefined ? { ok: false, message: '图片过大、格式不支持或重复' } : { ok: true, item });
+          } catch (e) {
+            return send(200, { ok: false, message: e instanceof Error ? e.message : String(e) });
+          }
+        }
+        if (rest === 'selfies/delete' && method === 'POST') {
+          try {
+            const parsed = JSON.parse(body || 'null') as { name?: unknown } | null;
+            const name = typeof parsed?.name === 'string' ? parsed.name : '';
+            if (name === '') return send(200, { ok: false, message: '缺少文件名' });
+            return send(200, { ok: deleteSelfie(root, name) });
+          } catch (e) {
+            return send(200, { ok: false, message: e instanceof Error ? e.message : String(e) });
+          }
+        }
+        if (rest === 'selfies' && method === 'GET') {
+          const items = listSelfies(root);
+          return send(200, { ok: true, count: items.length, items, dir: selfieDir(root) });
+        }
         return send(405, { error: 'method not allowed' });
       }
 

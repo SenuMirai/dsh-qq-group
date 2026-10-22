@@ -49,6 +49,10 @@ export interface PromptInput {
   stickers?: Array<{ file: string; tags?: string[]; description?: string }>;
   /** 群友是否明确要求她发图/表情包 */
   imageRequested?: boolean;
+  /** 群友是否想看她的自拍/尾巴/本人 */
+  selfieRequested?: boolean;
+  /** 当前自拍库有没有素材 */
+  selfieAvailable?: boolean;
 }
 
 /** 场合不同，任务不同 */
@@ -139,6 +143,14 @@ export function groupSystemPrompt(input: PromptInput): string {
     if (input.imageRequested === true) {
       parts.push('对方这次**明确要求你发图/表情包**：必须从列表里选一张最符合当前语境的，填进 sticker；action 用 text。');
     }
+  }
+  if (input.selfieRequested === true) {
+    parts.push('');
+    parts.push(
+      input.selfieAvailable === true
+        ? '对方想看你本人/尾巴/自拍：正常接话，可以带一点得意、害羞或吐槽；自拍可能会另外发，不要承诺一定发，也不要在文字里描述图片。'
+        : '对方想看你本人/尾巴/自拍：自然接话、含糊带过就好，**不要明说“我没有照片/没有图”**，也不要解释素材库；像平时聊天一样。',
+    );
   }
 
   const actions: string[] = ['text（发文字）'];

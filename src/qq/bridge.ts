@@ -32,6 +32,7 @@ import { basename, join } from 'node:path';
 
 import { policyFor, type GroupPolicy, type QqConfig } from './config';
 import { createOpenAiClient, parseReplyPlan, type ChatClient, type ChatImage } from './llm';
+import type { SelfieHub, SelfieInfo } from './selfies';
 import {
   appendTurn,
   estimateTokens,
@@ -49,6 +50,7 @@ import {
   CHAT_DEBOUNCE_MS,
   asksToSeeImage,
   asksToSendImage,
+  asksForSelfie,
   burstGap,
   chatWindowElapsed,
   classifyTrigger,
@@ -101,6 +103,8 @@ export interface BridgeDeps {
   onState?: () => void;
   /** 表情包池（可选；宿主提供：列文件名、收图、取路径） */
   stickers?: StickerHub;
+  /** 鲸鱼娘自拍照仓库 */
+  selfies?: SelfieHub;
   /** 是否允许自动收藏群友图片（宿主读设置；false/缺省 = 不存） */
   stickerSaveEnabled?: () => boolean;
   /** 日记落盘（宿主提供；写进「鲸鱼娘的日记」） */
@@ -632,7 +636,11 @@ export class QqBridge {
       policy.imageView !== 'off' &&
       (asksToSeeImage(message.text) || /^(看看|看下|看一下|瞅瞅|瞧瞧)$/.test(message.text.trim()));
     // 明确要求她发图/发表情包：也按直接对话处理
-    const imageSendRequest = policy.imageEnabled && asksToSendImage(message.text);
+    const rawImageSendRequest = policy.imageEnabled && asksToSendImage(message.text);
+    // 想看她的尾巴/耳朵/本人，或“爆个照”：走自拍库，不抢有图时的识图
+    const selfieRequest =
+      policy.selfieEnabled && !imageRequest && asksForSelfie(message.text, policy.selfieKeywords);
+    const imageSendRequest = rawImageSendRequest && !selfieRequest;
     // 画像：所有开启群里的发言都记；主人初始 +60，白名单 +20
     const userRules = this.deps.rules?.(userId);
     const initialAffinity =
@@ -642,14 +650,14 @@ export class QqBridge {
           ? userRules.initialWhitelistAffinity ?? 20
           : 0;
     this.deps.profiles?.touch(groupId, userId, name, {
-      mention: trigger === 'at' || trigger === 'call' || imageRequest || imageSendRequest,
+      mention: trigger === 'at' || trigger === 'call' || imageRequest || imageSendRequest || selfieRequest,
       initialAffinity,
     });
     // 引用回复她刚才那条消息 = 明确在跟她说话（比 @ 还准）
     const repliedToSelf =
       message.replyToId !== undefined && this.selfMessageIds.get(groupId)?.has(message.replyToId) === true;
     if (repliedToSelf) this.deps.profiles?.noteQuote(groupId, userId);
-    if (trigger === 'none' && !repliedToSelf && !imageRequest && !imageSendRequest) return;
+    if (trigger === 'none' && !repliedToSelf && !imageRequest && !imageSendRequest && !selfieRequest) return;
 
     // 让模型判断「这条是不是在怼她」，异步扣好感，不挡回复。
     // 只对直接对她说、或明显在聊她/DeepSeek 的消息跑，避免每条都多花一次调用。
@@ -663,7 +671,7 @@ export class QqBridge {
 
     // @ 与叫名字 / 引用她：立刻回（不受去抖窗口影响，但受冷却/限流约束）
     // 「叫名字」在提示词里与 @ 同一档：都是明确的「在跟你说话」
-    if (trigger === 'at' || trigger === 'call' || repliedToSelf || imageRequest || imageSendRequest) {
+    if (trigger === 'at' || trigger === 'call' || repliedToSelf || imageRequest || imageSendRequest || selfieRequest) {
       clearChatWindow(state);
       this.pendingTexts.delete(groupId);
       this.pendingAtOther.delete(groupId);
@@ -1108,7 +1116,14 @@ export class QqBridge {
       } catch {
         /* 窗口信息不可用时不裁剪 */
       }
-      const imageSendRequest = message !== undefined && policy.imageEnabled && asksToSendImage(message.text);
+      const rawImageSendRequest = message !== undefined && policy.imageEnabled && asksToSendImage(message.text);
+      const selfieRequest =
+        message !== undefined &&
+        policy.selfieEnabled &&
+        !message.hasImage &&
+        asksForSelfie(message.text, policy.selfieKeywords);
+      const imageSendRequest = rawImageSendRequest && !selfieRequest;
+      const selfieAvailable = (this.deps.selfies?.list().length ?? 0) > 0;
       const viewImages = this.shouldViewImages(groupId, policy, message, mode);
       const chatImages = viewImages && message !== undefined ? await this.downloadChatImages(message) : [];
       const system = groupSystemPrompt({
@@ -1124,6 +1139,8 @@ export class QqBridge {
         hasImage: message?.hasImage === true,
         canSeeImage: chatImages.length > 0,
         imageRequested: imageSendRequest,
+        selfieRequested: selfieRequest,
+        selfieAvailable,
         ...(this.deps.stickers === undefined
           ? {}
           : {
@@ -1158,14 +1175,16 @@ export class QqBridge {
       this.lastError = undefined;
 
       let plan = parseReplyPlanSafe(result.text, policy);
-      // 明确要图时优先保证图；不要被语音/唱歌分支提前 return
-      if (imageSendRequest && plan.action !== 'text') plan = { ...plan, action: 'text' };
+      // 明确要图/要自拍时优先保证图；不要被语音/唱歌分支提前 return
+      if ((imageSendRequest || selfieRequest) && plan.action !== 'text') plan = { ...plan, action: 'text' };
+      const selectedSelfie = selfieRequest && message !== undefined ? this.deps.selfies?.pick(message.text) : undefined;
       // 语音概率独立掷骰：不再等模型“选 voice”。
       // 只要这次回复适合转语音，就按 voiceChance / proactiveVoiceChance 抽一次；
       // 模型原本选 voice 但没抽中，就退回文字。
       const spokenText = plan.messages.join('，');
       const voiceEligible =
         !imageSendRequest &&
+        !selfieRequest &&
         plan.action !== 'sing' &&
         plan.sticker === undefined &&
         message?.hasImage !== true &&
@@ -1209,7 +1228,7 @@ export class QqBridge {
         });
       }
 
-      const sentCount = await this.deliver(groupId, policy, plan, now, mode, imageSendRequest);
+      const sentCount = await this.deliver(groupId, policy, plan, now, mode, imageSendRequest, selfieRequest, selectedSelfie);
       if (sentCount > 0) {
         const stat = this.statOf(groupId);
         stat.replied += sentCount;
@@ -1246,6 +1265,8 @@ export class QqBridge {
     now: number,
     mode: SpeakMode,
     imageRequested = false,
+    selfieRequested = false,
+    selfie?: SelfieInfo,
   ): Promise<number> {
     // 唱歌优先级最高：整段是一条语音，不用连发
     if (plan.action === 'sing' && policy.singOnRequest) {
@@ -1289,9 +1310,10 @@ export class QqBridge {
     }
 
     // 表情包：模型点名 或 群友明确要求；这个群允许发图、概率命中才真发
-    const sticker = plan.sticker;
+    // 自拍请求优先发自拍，不再额外塞一张普通表情包
+    const sticker = selfieRequested ? undefined : plan.sticker;
     const stickerChance = imageRequested ? policy.requestedImageChance : policy.imageChance;
-    const wantsSticker = sticker !== undefined || imageRequested;
+    const wantsSticker = !selfieRequested && (sticker !== undefined || imageRequested);
     if (wantsSticker && policy.imageEnabled && stickerChance > 0 && Math.random() < stickerChance) {
       const file = this.deps.stickers?.select?.(sticker) ?? this.deps.stickers?.resolve(sticker ?? '');
       if (file !== undefined) {
@@ -1306,6 +1328,23 @@ export class QqBridge {
         }
       } else if (imageRequested) {
         this.log('warn', '对方要求发表情包，但仓库里没有可用的图');
+      }
+    }
+    // 鲸鱼娘自拍照：明确要自拍/看尾巴时按独立概率发；没有素材就安静地只发文字
+    if (selfieRequested && policy.selfieEnabled && selfie !== undefined) {
+      const selfieChance = policy.selfieChance;
+      if (selfieChance > 0 && Math.random() < selfieChance) {
+        const file = this.deps.selfies?.resolve(selfie.file);
+        if (file !== undefined) {
+          const imageSent = await this.sendSegments(groupId, [{ type: 'image', data: { file } }]);
+          if (imageSent.ok) {
+            sent += 1;
+            this.deps.selfies?.markUsed?.(selfie.file);
+            this.appendAssistant(groupId, '（发了张鲸鱼娘自拍）', Date.now());
+          } else {
+            this.log('warn', `自拍发送失败（${imageSent.reason}）：${imageSent.message}`);
+          }
+        }
       }
     }
     return sent;

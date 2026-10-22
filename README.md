@@ -199,6 +199,17 @@ DSH 设置 →「QQ 群聊」→「连接」：
 
 
 
+
+
+### v1.4.0 鲸鱼娘自拍照与隐式看图
+
+- 在「表情包」页内新增 **鲸鱼娘自拍照** 库，独立于普通表情包；支持上传/删除/打开文件夹。
+- “看看尾巴 / 看看你 / 爆个照”等在无附图时按自拍请求处理，按 per-group 自拍概率发送。
+- 自拍概率 0~100%，100% = 有素材时必发。
+- 自拍库为空时只按正常文字聊天含糊带过，不明说“我没有照片/图”。
+- 有附图时“看看你/看看尾巴”优先识图，不会误发自己的自拍。
+- 自拍触发词可在表情包页追加，按群生效。
+
 ### v1.3.0 发表情包与唱歌概率
 
 - 发图概率从「接话」移到「表情包」页靠前位置：
@@ -443,6 +454,17 @@ Each project keeps its own license; this project borrows design ideas only and d
 
 
 
+
+
+
+### v1.4.0 selfie library and implicit visual intents
+
+- Added a **whale-girl selfie** library inside Stickers, separate from the normal sticker repo; upload/delete/open-folder supported.
+- "Show your tail / show yourself / send a selfie" without an attached image is treated as a selfie request and uses a per-group selfie chance.
+- Selfie chance 0–100%; 100% always sends when an asset exists.
+- With an empty library it replies as normal text and never says "I have no photo".
+- When an image is attached, "look at you/tail" prefers image understanding and does not send a selfie.
+- Extra selfie trigger words are configurable per group in the Stickers tab.
 
 ### v1.3.0 sticker request and singing probability
 

@@ -115,6 +115,12 @@ export interface GroupPolicy {
   imageChance: number;
   /** 群友明确要求发图/表情包时，真的发出去的概率（0~1；100% 必发） */
   requestedImageChance: number;
+  /** 允许在“爆个照/看看你/看看尾巴”时发鲸鱼娘自拍照 */
+  selfieEnabled: boolean;
+  /** 自拍发送概率（0~1；100% 必发，前提是有素材） */
+  selfieChance: number;
+  /** 额外的自拍触发词（部位/称呼） */
+  selfieKeywords: string[];
   /**
    * 什么时候把群友图片交给视觉模型：
    * off（全关）/ all（所有图）/ custom（按 imageViewModes 多选）
@@ -301,6 +307,9 @@ export function defaultGroupPolicy(): GroupPolicy {
     imageEnabled: false,
     imageChance: 0.2,
     requestedImageChance: 0.9,
+    selfieEnabled: true,
+    selfieChance: 0.8,
+    selfieKeywords: ['尾巴', '耳朵', '鱼尾', '头发', '脸', '眼睛', '衣服', '裙子', '自拍', '长什么样', '长啥样'],
     imageView: 'custom',
     imageViewModes: ['at'],
   };
@@ -588,6 +597,11 @@ export function normalizeGroupPolicy(raw: unknown, path: string, base = defaultG
       0,
       1,
     ),
+    selfieEnabled: src.selfieEnabled !== false,
+    selfieChance: num(src.selfieChance, `${path}.selfieChance`, base.selfieChance, 0, 1),
+    selfieKeywords: Array.isArray(src.selfieKeywords)
+      ? src.selfieKeywords.filter((word): word is string => typeof word === 'string' && word.trim() !== '').map((word) => word.trim()).slice(0, 30)
+      : base.selfieKeywords,
     imageView,
     imageViewModes,
     keywordChances: chanceMap(src.keywordChances, `${path}.keywordChances`, base.keywordChances),

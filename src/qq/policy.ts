@@ -240,7 +240,7 @@ export function hasSubstantiveText(text: string): boolean {
 export function asksToSeeImage(text: string): boolean {
   const value = text.trim();
   if (value === '') return false;
-  const mentionsImage = /图|图片|照片|截图|表情包|画面|这张|这个|这猫|这狗|这画|这人/.test(value);
+  const mentionsImage = /图|图片|照片|截图|表情包|画面|这张|这个|这猫|这狗|这画|这人|你|您|妳|尾巴|耳朵|鱼尾/.test(value);
   const asks = /看看|看一下|看下|瞅瞅|瞧瞧|评价|觉得|可爱|好看|怎么样|如何|是什么|啥|谁|认得出|看得见/.test(value);
   return mentionsImage && asks;
 }
@@ -254,6 +254,20 @@ export function asksToSendImage(text: string): boolean {
     /(?:图|图片|照片|表情包|表情).{0,4}(?:发|来|整|给|丢|甩)/.test(value) ||
     /斗图/.test(value)
   );
+}
+
+/**
+ * 是否在要求看她本人/尾巴/耳朵/自拍。
+ * 只在消息没有附图时使用；有图时优先按“看这张图”处理。
+ */
+export function asksForSelfie(text: string, extraKeywords: readonly string[] = []): boolean {
+  const value = text.trim();
+  if (value === '') return false;
+  const extra = extraKeywords.some((word) => word !== '' && value.includes(word));
+  const refersToHer =
+    /你|您|妳|鲸鱼|大肥鱼|尾巴|耳朵|鱼尾|头发|脸|眼睛|衣服|裙子|自拍|照|长什么样|长啥样/.test(value) || extra;
+  const asks = /看看|看一下|看下|露一下|展示|发|来|拍|爆|整/.test(value);
+  return refersToHer && asks;
 }
 
 /** 文本里有没有叫到她的名字（支持多个名字，逗号/顿号/斜杠分隔） */
