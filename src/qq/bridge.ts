@@ -812,7 +812,7 @@ export class QqBridge {
     const trigger = classifyTrigger(message, policy, this.config.selfName);
     // 明确让她看图：即使没 @ / 没叫名字，也按直接对话处理
     const imageRequest =
-      message.hasImage &&
+      (message.hasImage || message.replyToId !== undefined) &&
       policy.imageView !== 'off' &&
       (asksToSeeImage(message.text) || /^(看看|看下|看一下|瞅瞅|瞧瞧)$/.test(message.text.trim()));
     // 明确要求她发图/发表情包：也按直接对话处理
@@ -1139,7 +1139,12 @@ export class QqBridge {
     message: GroupMessage | undefined,
     mode: SpeakMode,
   ): boolean {
-    if (message === undefined || message.images.length === 0 || policy.imageView === 'off') return false;
+    if (
+      message === undefined ||
+      policy.imageView === 'off' ||
+      (message.images.length === 0 && message.replyToId === undefined)
+    )
+      return false;
     // 明确让她看/评价图片时，即使没有 @ 也算强相关；只有手动选了 off 才关
     if (asksToSeeImage(message.text) || /^(看看|看下|看一下|瞅瞅|瞧瞧)$/.test(message.text.trim())) return true;
     if (policy.imageView === 'all') return true;
@@ -1160,10 +1165,25 @@ export class QqBridge {
 
   /** 从 QQ 图片段下载最多 2 张，转成可以交给 DSH 视觉模型的字节 */
   private async downloadChatImages(message: GroupMessage): Promise<ChatImage[]> {
+    let segments = message.images;
+    if (segments.length === 0 && message.replyToId !== undefined) {
+      segments = await this.quotedImages(message.replyToId);
+    }
     const images: ChatImage[] = [];
-    for (const seg of message.images.slice(0, 2)) {
+    for (const seg of segments.slice(0, 2)) {
       const url =
         typeof seg.data?.url === 'string' ? seg.data.url : typeof seg.data?.file === 'string' ? seg.data.file : '';
+      if (/^base64:\/\//i.test(url)) {
+        try {
+          const bytes = Buffer.from(url.slice('base64://'.length), 'base64');
+          if (bytes.byteLength > 0 && bytes.byteLength <= 4 * 1024 * 1024) {
+            images.push({ data: new Uint8Array(bytes), mediaType: 'image/jpeg', name: `qq-quoted-${Date.now()}.jpg` });
+          }
+        } catch {
+          /* ignore */
+        }
+        continue;
+      }
       if (!/^https?:\/\//i.test(url)) continue;
       try {
         const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
@@ -1178,6 +1198,29 @@ export class QqBridge {
       }
     }
     return images;
+  }
+
+  /** 取被引用消息里的图片段（别人引用前面的图片时，当前消息本身没有图片） */
+  private async quotedImages(messageId: string): Promise<ObSegment[]> {
+    if (this.client === undefined) return [];
+    try {
+      const response = await this.client.call('get_msg', { message_id: Number(messageId) });
+      if (response.status !== 'ok' && response.retcode !== 0) return [];
+      const data = response.data as { message?: unknown } | undefined;
+      const raw = data?.message;
+      if (!Array.isArray(raw)) return [];
+      return raw.filter(
+        (seg): seg is ObSegment =>
+          seg !== null &&
+          typeof seg === 'object' &&
+          (seg as { type?: unknown }).type === 'image' &&
+          (seg as { data?: unknown }).data !== null &&
+          typeof (seg as { data?: unknown }).data === 'object',
+      );
+    } catch (e) {
+      this.log('debug', `读取被引用消息图片失败：${e instanceof Error ? e.message : String(e)}`);
+      return [];
+    }
   }
 
   /** 她正在生成时收到的直接对话：先排队，生成完立刻处理，绝不丢 */

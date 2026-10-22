@@ -257,7 +257,7 @@ export function asksToSeeImage(text: string): boolean {
   const value = text.trim();
   if (value === '') return false;
   const mentionsImage = /图|图片|照片|截图|表情包|画面|这张|这个|这猫|这狗|这画|这人|你|您|妳|尾巴|耳朵|鱼尾/.test(value);
-  const asks = /看看|看一下|看下|瞅瞅|瞧瞧|评价|觉得|可爱|好看|怎么样|如何|是什么|啥|谁|认得出|看得见/.test(value);
+  const asks = /看看|看一下|看下|瞅瞅|瞧瞧|评价|觉得|可爱|好看|怎么样|如何|是什么|啥|谁|认得出|看得见|是谁|是你|是不是你|像不像/.test(value);
   return mentionsImage && asks;
 }
 

@@ -207,6 +207,14 @@ DSH 设置 →「QQ 群聊」→「连接」：
 
 
 
+
+
+### v1.7.1 引用图片与启动默认值
+
+- 引用之前的图片时，通过 get_msg 读取被引用消息里的图片再交给视觉模型。
+- 引用图片 + “这个是你吗/看看/评价”按直接对话处理。
+- autoStart 默认改为 false：重启 DSH 不自动启动 QQ 连接，需在运行状态点“启动”。
+
 ### v1.7.0 按群心情 v1
 
 - 每个群独立心情 0~100 + 七根情绪，基线默认 70。
@@ -493,6 +501,14 @@ Each project keeps its own license; this project borrows design ideas only and d
 
 
 
+
+
+
+### v1.7.1 quoted images and auto-start
+
+- Quoted previous images are fetched via get_msg and passed to vision.
+- Quoted image + “is this you / look / evaluate” goes through direct reply.
+- autoStart now defaults to false: restarting DSH does not start QQ; use the Start button.
 
 ### v1.7.0 per-group mood v1
 

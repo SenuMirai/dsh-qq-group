@@ -144,9 +144,9 @@ const DEFAULT_SETTINGS: Settings = {
   stickerAnalyzeOnSave: false,
   stickerMax: 300,
   stickerMaxMB: 200,
-  autoStart: true,
+  autoStart: false,
   autoLaunchNapcat: true,
-  napcatLauncher: 'C:\\DSHwork\\start-napcat.bat',
+  napcatLauncher: '',
   whitelist: [],
   whitelistFloor: 95,
   blacklist: [],
@@ -245,7 +245,7 @@ function readSettings(root: string): Settings {
       stickerAnalyzeOnSave: raw.stickerAnalyzeOnSave === true,
       stickerMax: number(raw.stickerMax, DEFAULT_SETTINGS.stickerMax, 20, 2000),
       stickerMaxMB: number(raw.stickerMaxMB, DEFAULT_SETTINGS.stickerMaxMB, 20, 5000),
-      autoStart: raw.autoStart !== false,
+      autoStart: raw.autoStart === true,
       autoLaunchNapcat: raw.autoLaunchNapcat !== false,
       napcatLauncher:
         typeof raw.napcatLauncher === 'string' && raw.napcatLauncher.trim() !== ''
