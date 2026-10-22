@@ -20,8 +20,19 @@ import { basename, extname, join } from 'node:path';
 
 import { BlockAssembler, createAssistantMessage, createUserMessage } from '@deepseek-ai/dsh-llm';
 import type { GroupPolicy, QqConfig } from './qq/config';
-import type { DiaryEntry, ProfileStore, StickerHub, StickerInfo, StickerSaveContext } from './qq/bridge';
+import type { DiaryEntry, ProfileStore } from './qq/bridge';
 import type { ObSegment } from './qq/types';
+import {
+  createStickerHub,
+  deleteStickers,
+  listStickerInfo,
+  listStickerRepos,
+  moveStickers,
+  stickerFile,
+  stickerFolder,
+  updateStickerMeta,
+  updateStickerRepos,
+} from './qq/stickers';
 import type { ScoreRules } from './qq/triggers';
 import {
   getProfile,
@@ -61,8 +72,16 @@ type Settings = {
   fallbackModel: ModelRef;
   /** 推理档位（空 = 跟随模型默认；具体档位来自模型能力） */
   reasoningEffort: string;
+  /** 每个 provider/model 的上下文窗口覆盖（tokens；0/缺省 = 跟随模型能力） */
+  contextWindows: Record<string, number>;
   /** 自动收藏群友发的图片/表情包 */
   stickerSave: boolean;
+  /** 入库过滤：smart = 只收像表情包的；all = 所有图都进暂存区 */
+  stickerFilter: 'smart' | 'all';
+  /** 新图默认放哪个仓库 */
+  stickerSaveRepo: string;
+  /** 入库后是否自动让模型猜含义（默认关，省 token） */
+  stickerAnalyzeOnSave: boolean;
   /** 表情包仓库最多保留多少张（超过删最旧） */
   stickerMax: number;
   /** 表情包仓库最多占多少 MB（超过删最旧） */
@@ -104,7 +123,11 @@ const DEFAULT_SETTINGS: Settings = {
   model: { provider: '', model: '' },
   fallbackModel: { provider: '', model: '' },
   reasoningEffort: '',
+  contextWindows: {},
   stickerSave: false,
+  stickerFilter: 'smart',
+  stickerSaveRepo: 'inbox',
+  stickerAnalyzeOnSave: false,
   stickerMax: 300,
   stickerMaxMB: 200,
   autoStart: true,
@@ -125,7 +148,6 @@ const DEFAULT_SETTINGS: Settings = {
 
 const settingsPath = (root: string): string => join(root, 'settings.json');
 const diaryPath = (root: string): string => join(root, 'diary.json');
-const stickersDir = (root: string): string => join(root, 'stickers');
 const DIARY_CAP = 1000;
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp']);
 
@@ -155,6 +177,11 @@ function readSettings(root: string): Settings {
           ? { provider: raw.model.provider, model: raw.model.model }
           : { provider: '', model: '' },
       reasoningEffort: typeof raw.reasoningEffort === 'string' ? raw.reasoningEffort : '',
+      contextWindows: Object.fromEntries(
+        Object.entries((raw.contextWindows ?? {}) as Record<string, unknown>)
+          .filter(([key, value]) => key.includes('/') && typeof value === 'number' && Number.isFinite(value) && value >= 1000)
+          .map(([key, value]) => [key, Math.min(2_000_000, Math.max(1000, Math.round(value as number)))]),
+      ),
       fallbackModel:
         raw.fallbackModel &&
         typeof raw.fallbackModel.provider === 'string' &&
@@ -162,6 +189,9 @@ function readSettings(root: string): Settings {
           ? { provider: raw.fallbackModel.provider, model: raw.fallbackModel.model }
           : { provider: '', model: '' },
       stickerSave: raw.stickerSave === true,
+      stickerFilter: raw.stickerFilter === 'all' ? 'all' : 'smart',
+      stickerSaveRepo: typeof raw.stickerSaveRepo === 'string' ? raw.stickerSaveRepo : 'inbox',
+      stickerAnalyzeOnSave: raw.stickerAnalyzeOnSave === true,
       stickerMax: number(raw.stickerMax, DEFAULT_SETTINGS.stickerMax, 20, 2000),
       stickerMaxMB: number(raw.stickerMaxMB, DEFAULT_SETTINGS.stickerMaxMB, 20, 5000),
       autoStart: raw.autoStart !== false,
@@ -265,225 +295,6 @@ function appendDiary(root: string, entry: DiaryEntry): void {
   const entries = readDiary(root);
   entries.push(entry);
   writeDiary(root, entries);
-}
-
-interface StickerMeta {
-  file: string;
-  addedAt: number;
-  tags: string[];
-  description: string;
-  used: number;
-  lastUsedAt?: number;
-  /** true = 含义是模型根据群聊上下文猜的，不是人工/视觉确认 */
-  inferred?: boolean;
-}
-
-interface StickerMetaFile {
-  version: 1;
-  items: Record<string, StickerMeta>;
-}
-
-const stickerMetaPath = (root: string): string => join(root, 'stickers.json');
-
-function readStickerMeta(root: string): StickerMetaFile {
-  try {
-    const parsed = JSON.parse(readFileSync(stickerMetaPath(root), 'utf8').replace(/^\uFEFF/, '')) as Partial<StickerMetaFile>;
-    if (parsed === null || typeof parsed !== 'object' || typeof parsed.items !== 'object' || parsed.items === null) {
-      return { version: 1, items: {} };
-    }
-    const items: Record<string, StickerMeta> = {};
-    for (const [file, raw] of Object.entries(parsed.items as Record<string, unknown>)) {
-      const item = raw as Partial<StickerMeta>;
-      if (typeof item?.description !== 'string') continue;
-      items[file] = {
-        file,
-        addedAt: typeof item.addedAt === 'number' ? item.addedAt : Date.now(),
-        tags: Array.isArray(item.tags) ? item.tags.filter((t): t is string => typeof t === 'string').slice(0, 8) : [],
-        description: item.description,
-        used: Math.max(0, Number(item.used) || 0),
-        ...(typeof item.lastUsedAt === 'number' ? { lastUsedAt: item.lastUsedAt } : {}),
-        ...(item.inferred === true ? { inferred: true } : {}),
-      };
-    }
-    return { version: 1, items };
-  } catch {
-    return { version: 1, items: {} };
-  }
-}
-
-function writeStickerMeta(root: string, meta: StickerMetaFile): void {
-  const path = stickerMetaPath(root);
-  const tmp = `${path}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(meta)}\n`, 'utf8');
-  renameSync(tmp, path);
-}
-
-function listStickerInfo(root: string): StickerInfo[] {
-  const dir = stickersDir(root);
-  try {
-    mkdirSync(dir, { recursive: true });
-    const meta = readStickerMeta(root);
-    return readdirSync(dir)
-      .filter((file) => IMAGE_EXT.has(extname(file).toLowerCase()))
-      .map((file) => {
-        const item = meta.items[file];
-        return item !== undefined
-          ? { file, tags: item.tags, description: item.description, addedAt: item.addedAt }
-          : { file, tags: ['未分类'], description: '未分类', addedAt: statSync(join(dir, file)).mtimeMs };
-      })
-      .sort((a, b) => (b.addedAt ?? 0) - (a.addedAt ?? 0));
-  } catch {
-    return [];
-  }
-}
-
-function listStickers(root: string): string[] {
-  return listStickerInfo(root).map((item) => item.file);
-}
-
-function resolveSticker(root: string, name: string): string | undefined {
-  const safe = basename(name);
-  if (!IMAGE_EXT.has(extname(safe).toLowerCase())) return undefined;
-  const file = join(stickersDir(root), safe);
-  return existsSync(file) ? file : undefined;
-}
-
-function stickerSlug(tags: string[]): string {
-  const cleaned = tags
-    .map((tag) => tag.replace(/[\\/:*?"<>|\s]+/g, '').slice(0, 10))
-    .filter((tag) => tag !== '')
-    .slice(0, 3);
-  return cleaned.length > 0 ? cleaned.join('-') : '未分类';
-}
-
-function renameStickerFile(root: string, file: string, tags: string[], description: string): string | undefined {
-  const dir = stickersDir(root);
-  const ext = extname(file);
-  const hash = basename(file, ext).replace(/[^a-z0-9]/gi, '').slice(-8) || 'img';
-  const d = new Date();
-  const pad = (n: number): string => String(n).padStart(2, '0');
-  const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-  const base = `${stamp}-${stickerSlug(tags.length > 0 ? tags : [description.slice(0, 10)])}-${hash}`;
-  let target = `${base}${ext}`;
-  let counter = 1;
-  while (existsSync(join(dir, target))) {
-    target = `${base}-${counter}${ext}`;
-    counter += 1;
-  }
-  try {
-    renameSync(join(dir, file), join(dir, target));
-    return target;
-  } catch {
-    return undefined;
-  }
-}
-
-function trimStickers(root: string, max: number, maxBytes: number): void {
-  const dir = stickersDir(root);
-  const meta = readStickerMeta(root);
-  const files = readdirSync(dir)
-    .filter((file) => IMAGE_EXT.has(extname(file).toLowerCase()))
-    .map((file) => {
-      const stat = statSync(join(dir, file));
-      return { file, at: meta.items[file]?.addedAt ?? stat.mtimeMs, size: stat.size };
-    })
-    .sort((a, b) => a.at - b.at);
-  let total = files.reduce((sum, item) => sum + item.size, 0);
-  while (files.length > max || total > maxBytes) {
-    const oldest = files.shift();
-    if (oldest === undefined) break;
-    try {
-      unlinkSync(join(dir, oldest.file));
-      total -= oldest.size;
-    } catch {
-      /* 忽略 */
-    }
-    delete meta.items[oldest.file];
-  }
-  writeStickerMeta(root, meta);
-}
-
-function makeStickerHub(
-  root: string,
-  isSaveEnabled: () => boolean,
-  getMax: () => number,
-  getMaxMB: () => number,
-  analyze: (context: StickerSaveContext) => Promise<{ tags: string[]; description: string } | undefined>,
-  log: (message: string) => void,
-): StickerHub {
-  return {
-    list: () => listStickerInfo(root),
-    resolve: (stickerName) => resolveSticker(root, stickerName),
-    markUsed: (stickerName) => {
-      try {
-        const safe = basename(stickerName);
-        const meta = readStickerMeta(root);
-        const item = meta.items[safe];
-        if (item !== undefined) {
-          item.used += 1;
-          item.lastUsedAt = Date.now();
-          writeStickerMeta(root, meta);
-        }
-      } catch {
-        /* 忽略 */
-      }
-    },
-    async save(seg: ObSegment, context?: StickerSaveContext): Promise<void> {
-      if (!isSaveEnabled()) return;
-      const url = typeof seg.data?.url === 'string' ? seg.data.url : typeof seg.data?.file === 'string' ? seg.data.file : '';
-      if (!/^https?:\/\//i.test(url)) return;
-      try {
-        const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
-        if (!res.ok) return;
-        const type = res.headers.get('content-type') ?? '';
-        if (!/^image\//i.test(type)) return;
-        const bytes = new Uint8Array(await res.arrayBuffer());
-        if (bytes.byteLength === 0 || bytes.byteLength > 2 * 1024 * 1024) return;
-        const hash = createHash('sha1').update(bytes).digest('hex').slice(0, 16);
-        const ext = type.includes('gif') ? '.gif' : type.includes('webp') ? '.webp' : type.includes('png') ? '.png' : '.jpg';
-        const dir = stickersDir(root);
-        mkdirSync(dir, { recursive: true });
-        let file = `${hash}${ext}`;
-        if (existsSync(join(dir, file))) return;
-        writeFileSync(join(dir, file), bytes);
-
-        const meta = readStickerMeta(root);
-        meta.items[file] = {
-          file,
-          addedAt: Date.now(),
-          tags: ['未分类'],
-          description: '未分类',
-          used: 0,
-        };
-        writeStickerMeta(root, meta);
-        trimStickers(root, getMax(), getMaxMB() * 1024 * 1024);
-
-        // 有上下文就让模型猜含义；猜完按「时间-含义-hash」重命名
-        if (context !== undefined) {
-          const guess = await analyze(context).catch(() => undefined);
-          if (guess !== undefined && guess.description.trim() !== '') {
-            const renamed = renameStickerFile(root, file, guess.tags, guess.description) ?? file;
-            const next = readStickerMeta(root);
-            const old = next.items[file];
-            if (old !== undefined) {
-              next.items[renamed] = {
-                ...old,
-                file: renamed,
-                tags: guess.tags.slice(0, 8),
-                description: guess.description.trim(),
-                inferred: true,
-              };
-              if (renamed !== file) delete next.items[file];
-              writeStickerMeta(root, next);
-            }
-            log(`收藏表情包：${renamed}（${guess.tags.join('/')}）`);
-          }
-        }
-      } catch (e) {
-        log(`收藏图片失败：${e instanceof Error ? e.message : String(e)}`);
-      }
-    },
-  };
 }
 
 type RouteResult = { kind: 'json'; status: number; obj: unknown } | { kind: 'text'; status: number; body: string };
@@ -601,7 +412,34 @@ export function apply(ctx: any): void {
     return { sel: fallback ?? { provider: '', model: '' }, source: 'session' };
   };
 
-  /** 从推理块里捞最后一个可解析的 JSON（有些模型只写思考不写正文） */
+  /** 当前模型上下文窗口：设置覆盖优先，否则读 DSH 模型能力 */
+  const modelWindowCache = new Map<string, number | undefined>();
+  const getContextWindow = async (): Promise<number | undefined> => {
+    const { sel } = effectiveModel();
+    if (sel.provider === '' || sel.model === '') return undefined;
+    const key = `${sel.provider}/${sel.model}`;
+    const override = readSettings(root).contextWindows[key];
+    if (override !== undefined && override > 0) return override;
+    if (modelWindowCache.has(key)) return modelWindowCache.get(key);
+    const llm = ctx.llm as
+      | { resolveModelInfo?: (provider: string, model: string) => Promise<unknown> }
+      | undefined;
+    if (typeof llm?.resolveModelInfo !== 'function') return undefined;
+    try {
+      const info = (await llm.resolveModelInfo(sel.provider, sel.model)) as
+        | { context?: { contextWindow?: unknown }; contextWindow?: unknown }
+        | undefined;
+      const raw = info?.context?.contextWindow ?? info?.contextWindow;
+      const window = typeof raw === 'number' && Number.isFinite(raw) && raw >= 1000 ? Math.round(raw) : undefined;
+      modelWindowCache.set(key, window);
+      return window;
+    } catch {
+      modelWindowCache.set(key, undefined);
+      return undefined;
+    }
+  };
+
+
   const lastJsonObject = (text: string): string | undefined => {
     for (let i = text.length - 1, tries = 0; i >= 0 && tries < 40; i -= 1) {
       if (text[i] !== '{') continue;
@@ -861,12 +699,14 @@ export function apply(ctx: any): void {
       else if (level === 'warn') console.warn(line);
       else console.log(line);
     },
-    stickers: makeStickerHub(
-      root,
-      () => readSettings(root).stickerSave,
-      () => readSettings(root).stickerMax,
-      () => readSettings(root).stickerMaxMB,
-      async (context) => {
+    stickers: createStickerHub(root, {
+      saveEnabled: () => readSettings(root).stickerSave,
+      filter: () => readSettings(root).stickerFilter,
+      saveRepo: () => readSettings(root).stickerSaveRepo,
+      analyzeOnSave: () => readSettings(root).stickerAnalyzeOnSave,
+      maxItems: () => readSettings(root).stickerMax,
+      maxMB: () => readSettings(root).stickerMaxMB,
+      analyze: async (context) => {
         const system = [
           '你在帮 QQ 群里的鲸鱼娘整理表情包。',
           '你看不到图片本身，只能根据“发图时大家在聊什么”猜测它的含义。',
@@ -874,11 +714,7 @@ export function apply(ctx: any): void {
           '标签用中文，例如：无语、翻白眼、猫猫、嘲讽、开心、安慰、装傻。',
           '如果上下文完全看不出含义，就输出 {"tags":["未分类"],"description":"未分类"}。',
         ].join('\n');
-        const user = [
-          `发图的人：${context.sender}`,
-          '最近聊天：',
-          ...context.recent,
-        ].join('\n');
+        const user = [`发图的人：${context.sender}`, '最近聊天：', ...context.recent].join('\n');
         const result = await generate(system, [], user, { purpose: 'sticker', timeoutMs: 20_000 });
         if (!result.ok) return undefined;
         try {
@@ -895,8 +731,8 @@ export function apply(ctx: any): void {
           return undefined;
         }
       },
-      (message) => console.warn(`[dsh-qq-group] ${message}`),
-    ),
+      log: (message) => console.warn(`[dsh-qq-group] ${message}`),
+    }),
     stickerSaveEnabled: () => readSettings(root).stickerSave,
     onDiary: (entry) => {
       try {
@@ -908,6 +744,7 @@ export function apply(ctx: any): void {
     profiles: profileStore,
     rules: rulesFor,
     hostilityJudge: () => readSettings(root).hostilityJudge,
+    contextWindow: getContextWindow,
   });
 
   const modelsList = async (): Promise<unknown> => {
@@ -966,7 +803,7 @@ export function apply(ctx: any): void {
           ...snapshot,
           model: { provider: sel.provider, model: sel.model, source },
           diaryCount: readDiary(root).length,
-          stickerCount: listStickers(root).length,
+          stickerCount: listStickerInfo(root).length,
           napcat: {
             url: cfg.url,
             reachable: target === undefined ? false : await portOpen(target.host, target.port),
@@ -1244,8 +1081,22 @@ export function apply(ctx: any): void {
         return send(405, { error: 'method not allowed' });
       }
 
-      if (rest === 'stickers' || rest === 'stickers/open') {
-        const dir = stickersDir(root);
+      if (rest === 'stickers/file' && method === 'GET') {
+        const name = url.searchParams.get('name') ?? '';
+        const path = stickerFile(root, name);
+        if (path === undefined) {
+          send(404, { ok: false, message: 'not found' });
+          return;
+        }
+        const ext = extname(path).toLowerCase();
+        const mime = ext === '.png' ? 'image/png' : ext === '.gif' ? 'image/gif' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+        res.writeHead(200, { 'content-type': mime, 'cache-control': 'no-store' });
+        res.end(readFileSync(path));
+        return;
+      }
+
+      if (rest === 'stickers' || rest === 'stickers/open' || rest === 'stickers/repos' || rest === 'stickers/move' || rest === 'stickers/delete' || rest === 'stickers/update') {
+        const dir = stickerFolder(root);
         if (rest === 'stickers/open' && method === 'POST') {
           if (process.platform !== 'win32') return send(200, { ok: false, message: '只有 Windows 支持直接打开文件夹' });
           try {
@@ -1256,23 +1107,102 @@ export function apply(ctx: any): void {
             return send(200, { ok: false, message: e instanceof Error ? e.message : String(e) });
           }
         }
-        const names = listStickers(root);
+        if (rest === 'stickers/repos') {
+          if (method === 'GET') {
+            return send(200, { ok: true, repos: listStickerRepos(root), saveRepo: readSettings(root).stickerSaveRepo });
+          }
+          if (method !== 'POST') return send(405, { error: 'method not allowed' });
+          const payload = JSON.parse(body || 'null') as { repos?: unknown } | null;
+          try {
+            const repos = updateStickerRepos(root, payload?.repos);
+            return send(200, { ok: true, repos });
+          } catch (e) {
+            return send(200, { ok: false, message: e instanceof Error ? e.message : String(e) });
+          }
+        }
+        if (rest === 'stickers/move') {
+          if (method !== 'POST') return send(405, { error: 'method not allowed' });
+          const payload = JSON.parse(body || 'null') as { files?: unknown; repoId?: unknown } | null;
+          const files = Array.isArray(payload?.files) ? payload.files.filter((f): f is string => typeof f === 'string') : [];
+          const repoId = typeof payload?.repoId === 'string' ? payload.repoId : '';
+          if (files.length === 0 || repoId === '') return send(200, { ok: false, message: '缺少 files/repoId' });
+          try {
+            return send(200, { ok: true, moved: moveStickers(root, files, repoId) });
+          } catch (e) {
+            return send(200, { ok: false, message: e instanceof Error ? e.message : String(e) });
+          }
+        }
+        if (rest === 'stickers/delete') {
+          if (method !== 'POST') return send(405, { error: 'method not allowed' });
+          const payload = JSON.parse(body || 'null') as { files?: unknown } | null;
+          const files = Array.isArray(payload?.files) ? payload.files.filter((f): f is string => typeof f === 'string') : [];
+          try {
+            return send(200, { ok: true, deleted: deleteStickers(root, files) });
+          } catch (e) {
+            return send(200, { ok: false, message: e instanceof Error ? e.message : String(e) });
+          }
+        }
+        if (rest === 'stickers/update') {
+          if (method !== 'POST') return send(405, { error: 'method not allowed' });
+          const payload = JSON.parse(body || 'null') as
+            | { file?: unknown; description?: unknown; tags?: unknown }
+            | null;
+          if (typeof payload?.file !== 'string') return send(200, { ok: false, message: '缺少 file' });
+          const updated = updateStickerMeta(root, payload.file, {
+            ...(typeof payload.description === 'string' ? { description: payload.description } : {}),
+            ...(Array.isArray(payload.tags)
+              ? { tags: payload.tags.filter((tag): tag is string => typeof tag === 'string') }
+              : {}),
+          });
+          return send(200, updated === undefined ? { ok: false, message: '表情包不存在' } : { ok: true, item: updated });
+        }
+        const names = listStickerInfo(root).map((item) => item.file);
         const items = listStickerInfo(root).map((item) => ({
           file: item.file,
           tags: item.tags ?? [],
           description: item.description ?? '未分类',
           addedAt: item.addedAt ?? 0,
+          repoId: item.repoId ?? '',
+          repoName: item.repoName ?? '',
+          repoWeight: item.repoWeight ?? 0,
+          status: item.status ?? 'inbox',
+          width: item.width,
+          height: item.height,
+          bytes: item.bytes,
+          used: item.used ?? 0,
         }));
         return send(200, {
           ok: true,
           stickers: names,
           items,
+          repos: listStickerRepos(root),
           count: names.length,
           saveEnabled: readSettings(root).stickerSave,
+          saveRepo: readSettings(root).stickerSaveRepo,
+          filter: readSettings(root).stickerFilter,
           max: readSettings(root).stickerMax,
           maxMB: readSettings(root).stickerMaxMB,
           dir,
         });
+      }
+
+      if (rest === 'memory') {
+        const urlGroup = url.searchParams.get('groupId') ?? '';
+        if (method === 'GET') {
+          return send(200, await qqHost.memory('get', urlGroup));
+        }
+        if (method !== 'POST') return send(405, { error: 'method not allowed' });
+        const payload = JSON.parse(body || 'null') as
+          | { action?: unknown; groupId?: unknown; keyMemories?: unknown }
+          | null;
+        const groupId = typeof payload?.groupId === 'string' ? payload.groupId : urlGroup;
+        if (payload?.action === 'set') {
+          return send(200, await qqHost.memory('set', groupId, payload.keyMemories));
+        }
+        if (payload?.action === 'compress') {
+          return send(200, await qqHost.memory('compress', groupId));
+        }
+        return send(200, { ok: false, message: '未知的 action' });
       }
 
       if (rest === 'config') {
@@ -1299,6 +1229,20 @@ export function apply(ctx: any): void {
                 : current.model,
             reasoningEffort:
               typeof patch.settings.reasoningEffort === 'string' ? patch.settings.reasoningEffort : current.reasoningEffort,
+            contextWindows:
+              patch.settings.contextWindows !== null && typeof patch.settings.contextWindows === 'object'
+                ? Object.fromEntries(
+                    Object.entries(patch.settings.contextWindows as Record<string, unknown>)
+                      .filter(
+                        ([key, value]) =>
+                          key.includes('/') &&
+                          typeof value === 'number' &&
+                          Number.isFinite(value) &&
+                          value >= 1000,
+                      )
+                      .map(([key, value]) => [key, Math.min(2_000_000, Math.max(1000, Math.round(value as number)))]),
+                  )
+                : current.contextWindows,
             fallbackModel:
               patch.settings.fallbackModel &&
               typeof patch.settings.fallbackModel.provider === 'string' &&
@@ -1306,6 +1250,15 @@ export function apply(ctx: any): void {
                 ? { provider: patch.settings.fallbackModel.provider, model: patch.settings.fallbackModel.model }
                 : current.fallbackModel,
             stickerSave: typeof patch.settings.stickerSave === 'boolean' ? patch.settings.stickerSave : current.stickerSave,
+            stickerFilter: patch.settings.stickerFilter === 'all' ? 'all' : 'smart',
+            stickerSaveRepo:
+              typeof patch.settings.stickerSaveRepo === 'string' && patch.settings.stickerSaveRepo.trim() !== ''
+                ? patch.settings.stickerSaveRepo.trim()
+                : current.stickerSaveRepo,
+            stickerAnalyzeOnSave:
+              typeof patch.settings.stickerAnalyzeOnSave === 'boolean'
+                ? patch.settings.stickerAnalyzeOnSave
+                : current.stickerAnalyzeOnSave,
             stickerMax:
               typeof patch.settings.stickerMax === 'number'
                 ? Math.min(2000, Math.max(20, Math.round(patch.settings.stickerMax)))

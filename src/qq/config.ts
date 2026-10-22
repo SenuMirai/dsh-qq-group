@@ -63,10 +63,46 @@ export interface GroupPolicy {
   maxRepliesPer10Min: number;
   /** 10 分钟内最多回复多少条「直接对话」（@ / 叫名字 / 引用 / 接着聊） */
   maxDirectRepliesPer10Min: number;
+  /** 每次带给模型的最近消息条数 */
+  contextTurns: number;
+  /** 每群保留的原始消息上限 */
+  memoryMaxTurns: number;
+  /** 记忆 token 预算（估算） */
+  memoryMaxTokens: number;
+  /** 摘要最大字符数 */
+  summaryMaxChars: number;
+  /** 压缩方式 */
+  compressMode: 'extractive' | 'llm' | 'hybrid';
+  /** 每新增多少条触发一次压缩 */
+  compressEveryTurns: number;
+  /** 关键记忆条数上限 */
+  keyMemoryMax: number;
+  /** 压缩掉的原文是否归档 */
+  archiveEnabled: boolean;
+  /** 文件读取总开关：off / all / custom */
+  fileReadMode: 'off' | 'all' | 'custom';
+  /** custom 下启用的文件读取条件（可多选） */
+  fileReadModes: Array<'at' | 'context' | 'question'>;
+  /** 单个文件最大 MB */
+  fileMaxMB: number;
+  /** 提取文本最大字符数 */
+  fileMaxChars: number;
+  /** 每天最多读多少个文件 */
+  fileDailyLimit: number;
+  /** 合并转发读取：off / all / custom */
+  forwardReadMode: 'off' | 'all' | 'custom';
+  /** custom 下启用的转发读取条件 */
+  forwardReadModes: Array<'at' | 'context' | 'question'>;
+  /** 最多展开多少条转发节点 */
+  forwardMaxNodes: number;
+  /** 转发文本最大字符数 */
+  forwardMaxChars: number;
   /** 冷场主动开口 */
   proactive: ProactiveConfig;
-  /** 回复里带语音的概率（0~1） */
+  /** 回复里带语音的概率（0~1；独立掷骰，不再依赖模型选 action=voice） */
   voiceChance: number;
+  /** 超过多少字不转语音（0 = 不限制） */
+  voiceMaxChars: number;
   /** 主动开口时用语音的概率（0~1） */
   proactiveVoiceChance: number;
   /** 回复里唱歌的概率（0~1，仅当被要求或概率命中） */
@@ -229,6 +265,23 @@ export function defaultGroupPolicy(): GroupPolicy {
     cooldownMs: 45_000,
     maxRepliesPer10Min: 6,
     maxDirectRepliesPer10Min: 20,
+    contextTurns: 24,
+    memoryMaxTurns: 200,
+    memoryMaxTokens: 12000,
+    summaryMaxChars: 2000,
+    compressMode: 'hybrid',
+    compressEveryTurns: 40,
+    keyMemoryMax: 50,
+    archiveEnabled: true,
+    fileReadMode: 'custom',
+    fileReadModes: ['at', 'question'],
+    fileMaxMB: 10,
+    fileMaxChars: 30000,
+    fileDailyLimit: 20,
+    forwardReadMode: 'custom',
+    forwardReadModes: ['at', 'question'],
+    forwardMaxNodes: 50,
+    forwardMaxChars: 10000,
     proactive: {
       enabled: true,
       minIdleMs: 5 * 60_000,
@@ -239,6 +292,7 @@ export function defaultGroupPolicy(): GroupPolicy {
       maxPerDay: 8,
     },
     voiceChance: 0.25,
+    voiceMaxChars: 80,
     proactiveVoiceChance: 0.1,
     singChance: 0.04,
     singOnRequest: true,
@@ -452,6 +506,56 @@ export function normalizeGroupPolicy(raw: unknown, path: string, base = defaultG
       0,
       1000,
     ),
+    contextTurns: Math.round(num(src.contextTurns, `${path}.contextTurns`, base.contextTurns, 1, 100)),
+    memoryMaxTurns: Math.round(num(src.memoryMaxTurns, `${path}.memoryMaxTurns`, base.memoryMaxTurns, 20, 5000)),
+    memoryMaxTokens: Math.round(num(src.memoryMaxTokens, `${path}.memoryMaxTokens`, base.memoryMaxTokens, 500, 200000)),
+    summaryMaxChars: Math.round(num(src.summaryMaxChars, `${path}.summaryMaxChars`, base.summaryMaxChars, 200, 20000)),
+    compressMode: enumOf<'extractive' | 'llm' | 'hybrid'>(
+      src.compressMode,
+      `${path}.compressMode`,
+      base.compressMode,
+      ['extractive', 'llm', 'hybrid'] as const,
+    ),
+    compressEveryTurns: Math.round(
+      num(src.compressEveryTurns, `${path}.compressEveryTurns`, base.compressEveryTurns, 5, 200),
+    ),
+    keyMemoryMax: Math.round(num(src.keyMemoryMax, `${path}.keyMemoryMax`, base.keyMemoryMax, 0, 500)),
+    archiveEnabled: src.archiveEnabled !== false,
+    fileReadMode: enumOf<'off' | 'all' | 'custom'>(
+      src.fileReadMode,
+      `${path}.fileReadMode`,
+      base.fileReadMode,
+      ['off', 'all', 'custom'] as const,
+    ),
+    fileReadModes: Array.isArray(src.fileReadModes)
+      ? [...new Set(
+          src.fileReadModes.filter(
+            (m): m is 'at' | 'context' | 'question' => m === 'at' || m === 'context' || m === 'question',
+          ),
+        )]
+      : base.fileReadModes,
+    fileMaxMB: Math.round(num(src.fileMaxMB, `${path}.fileMaxMB`, base.fileMaxMB, 1, 100)),
+    fileMaxChars: Math.round(num(src.fileMaxChars, `${path}.fileMaxChars`, base.fileMaxChars, 1000, 200000)),
+    fileDailyLimit: Math.round(num(src.fileDailyLimit, `${path}.fileDailyLimit`, base.fileDailyLimit, 0, 200)),
+    forwardReadMode: enumOf<'off' | 'all' | 'custom'>(
+      src.forwardReadMode,
+      `${path}.forwardReadMode`,
+      base.forwardReadMode,
+      ['off', 'all', 'custom'] as const,
+    ),
+    forwardReadModes: Array.isArray(src.forwardReadModes)
+      ? [...new Set(
+          src.forwardReadModes.filter(
+            (m): m is 'at' | 'context' | 'question' => m === 'at' || m === 'context' || m === 'question',
+          ),
+        )]
+      : base.forwardReadModes,
+    forwardMaxNodes: Math.round(
+      num(src.forwardMaxNodes, `${path}.forwardMaxNodes`, base.forwardMaxNodes, 1, 200),
+    ),
+    forwardMaxChars: Math.round(
+      num(src.forwardMaxChars, `${path}.forwardMaxChars`, base.forwardMaxChars, 500, 50000),
+    ),
     proactive: {
       enabled: bool(pro.enabled, `${path}.proactive.enabled`, base.proactive.enabled),
       minIdleMs: num(pro.minIdleMs, `${path}.proactive.minIdleMs`, base.proactive.minIdleMs, 0, 7 * 24 * 3600_000),
@@ -462,6 +566,7 @@ export function normalizeGroupPolicy(raw: unknown, path: string, base = defaultG
       maxPerDay: num(pro.maxPerDay, `${path}.proactive.maxPerDay`, base.proactive.maxPerDay, 0, 1000),
     },
     voiceChance: num(src.voiceChance, `${path}.voiceChance`, base.voiceChance, 0, 1),
+    voiceMaxChars: num(src.voiceMaxChars, `${path}.voiceMaxChars`, base.voiceMaxChars, 0, 500),
     proactiveVoiceChance: num(
       src.proactiveVoiceChance,
       `${path}.proactiveVoiceChance`,

@@ -26,12 +26,25 @@ export const MAX_TURNS_PER_GROUP = 200;
 /** 每个群保留多少个群 */
 export const MAX_GROUPS = 100;
 
+/** 一条关键记忆（长期保留的事实/偏好/关系/梗） */
+export interface KeyMemory {
+  id: string;
+  kind: 'fact' | 'preference' | 'relationship' | 'inside_joke';
+  text: string;
+  confidence: number;
+  pinned: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
 /** 一条记忆里的群记录 */
 export interface GroupMemory {
   /** 群名（能拿到就存，面板显示用） */
   name?: string;
-  /** 被挤出上下文的旧记录压缩成的一段摘要（提取式，不含模型调用） */
+  /** 被挤出上下文的旧记录压缩成的一段摘要 */
   summary?: string;
+  /** 长期关键记忆 */
+  keyMemories: KeyMemory[];
   /** 按时间正序 */
   turns: Turn[];
   updatedAt: number;
@@ -39,20 +52,20 @@ export interface GroupMemory {
 
 /** 记忆文件结构 */
 export interface MemoryFile {
-  version: 1;
+  version: 2;
   groups: Record<string, GroupMemory>;
 }
 
 /** 空记忆 */
 export function emptyMemory(): MemoryFile {
-  return { version: 1, groups: {} };
+  return { version: 2, groups: {} };
 }
 
 /** 取某个群的记忆（不存在就建一个） */
 export function groupMemory(memory: MemoryFile, groupId: string): GroupMemory {
   const existing = memory.groups[groupId];
   if (existing !== undefined) return existing;
-  const created: GroupMemory = { turns: [], updatedAt: Date.now() };
+  const created: GroupMemory = { turns: [], keyMemories: [], updatedAt: Date.now() };
   memory.groups[groupId] = created;
   return created;
 }
@@ -65,9 +78,10 @@ export function appendTurn(
   memory: MemoryFile,
   groupId: string,
   turn: Turn,
-  options: { maxTurns?: number; maxGroups?: number } = {},
+  options: { maxTurns?: number; maxGroups?: number; summaryMaxChars?: number } = {},
 ): string | undefined {
   const limit = options.maxTurns ?? MAX_TURNS_PER_GROUP;
+  const summaryMaxChars = options.summaryMaxChars ?? 1200;
   const group = groupMemory(memory, groupId);
   group.turns.push(turn);
   if (group.turns.length > limit) {
@@ -76,7 +90,7 @@ export function appendTurn(
       const text = removed
         .map((item) => `${item.role === 'user' ? item.name : '她'}：${item.text.slice(0, 40)}`)
         .join('；');
-      group.summary = `${group.summary === undefined || group.summary === '' ? '' : `${group.summary}；`}${text}`.slice(-1200);
+      group.summary = `${group.summary === undefined || group.summary === '' ? '' : `${group.summary}；`}${text}`.slice(-summaryMaxChars);
     }
   }
   group.updatedAt = turn.ts;
@@ -131,6 +145,66 @@ export function relativeTime(then: number, now: number): string {
   return `${Math.floor(delta / 86_400_000)} 天前`;
 }
 
+/** 粗略 token 估算：中文按 1 字≈0.7 token，英文按 4 字符≈1 token */
+export function estimateTokens(text: string): number {
+  if (text === '') return 0;
+  let cjk = 0;
+  let other = 0;
+  for (const ch of text) {
+    if (/[\u3400-\u9fff\uf900-\ufaff]/.test(ch)) cjk += 1;
+    else other += 1;
+  }
+  return Math.ceil(cjk * 0.7 + other / 4);
+}
+
+export function normalizeKeyMemories(raw: unknown): KeyMemory[] {
+  if (!Array.isArray(raw)) return [];
+  const out: KeyMemory[] = [];
+  const seen = new Set<string>();
+  for (const value of raw) {
+    if (value === null || typeof value !== 'object') continue;
+    const item = value as Partial<KeyMemory>;
+    const text = typeof item.text === 'string' ? item.text.trim().slice(0, 160) : '';
+    if (text === '') continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const kind =
+      item.kind === 'preference' || item.kind === 'relationship' || item.kind === 'inside_joke' ? item.kind : 'fact';
+    out.push({
+      id: typeof item.id === 'string' && item.id !== '' ? item.id : `m-${Date.now().toString(36)}-${out.length}`,
+      kind,
+      text,
+      confidence: typeof item.confidence === 'number' ? Math.max(0, Math.min(1, item.confidence)) : 0.6,
+      pinned: item.pinned === true,
+      createdAt: typeof item.createdAt === 'number' ? item.createdAt : Date.now(),
+      updatedAt: typeof item.updatedAt === 'number' ? item.updatedAt : Date.now(),
+    });
+  }
+  return out;
+}
+
+/** 合并关键记忆：去重、保留 pinned、限量 */
+export function mergeKeyMemories(
+  existing: KeyMemory[],
+  incoming: KeyMemory[],
+  limit: number,
+): KeyMemory[] {
+  const map = new Map<string, KeyMemory>();
+  for (const item of normalizeKeyMemories(existing)) map.set(item.text.toLowerCase(), item);
+  for (const item of normalizeKeyMemories(incoming)) {
+    const key = item.text.toLowerCase();
+    const old = map.get(key);
+    if (old === undefined) {
+      map.set(key, item);
+    } else {
+      map.set(key, { ...old, confidence: Math.max(old.confidence, item.confidence), updatedAt: Date.now(), pinned: old.pinned });
+    }
+  }
+  const all = [...map.values()].sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt - a.updatedAt);
+  return all.slice(0, Math.max(0, limit));
+}
+
 /** 从任意输入里读记忆文件；文件不存在/坏了都返回空记忆（并报告是否重建） */
 export function readMemoryFile(path: string): { memory: MemoryFile; problem?: string } {
   let raw: string;
@@ -153,11 +227,12 @@ export function readMemoryFile(path: string): { memory: MemoryFile; problem?: st
       groups[groupId] = {
         name: typeof g.name === 'string' ? g.name : undefined,
         summary: typeof g.summary === 'string' ? g.summary : undefined,
-        turns: g.turns.filter(isTurn).slice(-MAX_TURNS_PER_GROUP),
+        keyMemories: normalizeKeyMemories(g.keyMemories),
+        turns: g.turns.filter(isTurn).slice(-5000),
         updatedAt: typeof g.updatedAt === 'number' ? g.updatedAt : Date.now(),
       };
     }
-    return { memory: { version: 1, groups } };
+    return { memory: { version: 2, groups } };
   } catch (e) {
     return { memory: emptyMemory(), problem: `记忆文件不是合法 JSON（${e instanceof Error ? e.message : String(e)}），已按空记忆启动` };
   }

@@ -89,6 +89,10 @@ export interface GroupMessage {
   hasImage: boolean;
   /** 图片段（最多保留 2 个；语音/唱歌时按需下载） */
   images: ObSegment[];
+  /** 文件段（群文件/文档） */
+  files?: ObSegment[];
+  /** 合并转发段 */
+  forwards?: ObSegment[];
   /** 是否包含语音段（QQ 语音消息 → silk，需要 NapCat 转码） */
   hasVoice: boolean;
 }

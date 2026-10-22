@@ -73,6 +73,8 @@ export function parseMessage(
   hasImage: boolean;
   hasVoice: boolean;
   images: ObSegment[];
+  files: ObSegment[];
+  forwards: ObSegment[];
   replyToId?: string;
   atOthers: string[];
 } {
@@ -106,12 +108,16 @@ export function parseMessage(
       hasImage,
       hasVoice,
       images: [],
+      files: [],
+      forwards: [],
       atOthers,
       ...(replyMatch === null ? {} : { replyToId: replyMatch[1].trim() }),
     };
   }
 
   const images: ObSegment[] = [];
+  const files: ObSegment[] = [];
+  const forwards: ObSegment[] = [];
   const atOthers: string[] = [];
   let replyToId: string | undefined;
   let atSelf = false;
@@ -161,9 +167,12 @@ export function parseMessage(
       case 'video':
         parts.push('[视频]');
         break;
-      case 'file':
-        parts.push('[文件]');
+      case 'file': {
+        files.push(seg);
+        const name = typeof seg.data.name === 'string' ? seg.data.name.slice(0, 80) : '';
+        parts.push(name === '' ? '[文件]' : `[文件：${name}]`);
         break;
+      }
       case 'json':
       case 'xml':
         parts.push('[卡片]');
@@ -181,6 +190,7 @@ export function parseMessage(
         parts.push('[音乐分享]');
         break;
       case 'forward':
+        forwards.push(seg);
         parts.push('[合并转发]');
         break;
       default:
@@ -197,6 +207,8 @@ export function parseMessage(
     hasImage: images.length > 0,
     hasVoice,
     images,
+    files,
+    forwards,
     atOthers,
     ...(replyToId === undefined ? {} : { replyToId }),
   };

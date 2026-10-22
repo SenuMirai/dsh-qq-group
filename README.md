@@ -187,6 +187,19 @@ DSH 设置 →「QQ 群聊」→「连接」：
 - 群聊内容会发给所选模型 provider，请自行评估隐私；
 - 请遵守 QQ 与群规，不要用于骚扰、刷屏或未授权自动化。
 
+
+
+### v0.2 新增
+
+- **表情包多仓库**：inbox / common / 自建仓库；每个仓库有发送权重（0 = 只手动用）、启用状态、默认入库设置；旧素材自动迁移到 common。
+- **新图暂存与整理**：新图默认进 inbox（权重 0），不会自动发出；可在 UI 里移动、删除、编辑含义，再放入常用仓库。
+- **入库过滤**：smart 模式跳过截图/大照片；支持全部保存；全局 SHA1 去重。
+- **语音概率修复**：回复语音概率改为独立掷骰，不再依赖模型主动选 voice；支持语音字数上限，TTS 失败自动回退文字。
+- **上下文长度**：在模型选择处按 provider/model 覆盖上下文窗口；按预算自动裁剪最近消息。
+- **记忆 v2**：可配置原始记忆条数/token 预算/摘要长度/压缩频率；压缩时自动抽取关键记忆（事实/偏好/关系/梗），原文可归档。
+- **文件阅读**：支持 txt/md/json/csv/代码、PDF 文本层、DOCX、XLSX；可配置触发条件、单文件 MB、最大字符数和每日上限。
+- **合并转发**：通过 OneBot get_forward_msg 展开转发记录；限制节点/字符数，嵌套只显示占位。
+
 ### 许可
 
 MIT，© 2026 SenuMirai。见 [LICENSE](./LICENSE)。
@@ -370,6 +383,19 @@ Each project keeps its own license; this project borrows design ideas only and d
 - Vision depends on the selected model; text-only models fall back to text.
 - Group messages are sent to the selected model provider; evaluate privacy accordingly.
 - Follow QQ rules and group rules; do not use for harassment, spam or unauthorized automation.
+
+
+
+### v0.2 additions
+
+- **Multiple sticker repositories**: inbox / common / custom repos, each with a send weight (0 = manual only), enabled flag and default-save setting; legacy assets migrate to common.
+- **Inbox workflow**: newly saved images go to inbox (weight 0) and are never auto-sent; move/delete/edit descriptions in the UI, then move approved ones to a common repo.
+- **Save filtering**: smart mode skips screenshots/large photos; keep-all mode available; global SHA1 dedupe.
+- **Voice probability fix**: reply voice is now an independent roll, no longer dependent on the model choosing voice; max character limit and text fallback on TTS failure.
+- **Context length**: per provider/model override; recent messages are trimmed to the budget.
+- **Memory v2**: configurable raw turn/token/summary limits and compression interval; compression extracts key memories (facts/preferences/relationships/jokes); original turns can be archived.
+- **File reading**: text/markdown/JSON/CSV/code, PDF text layer, DOCX, XLSX; configurable triggers, max MB, max characters and daily limit.
+- **Forwarded chat records**: expand with OneBot get_forward_msg; node/character caps; nested forwards show a placeholder.
 
 ### License
 

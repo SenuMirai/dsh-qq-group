@@ -68,6 +68,12 @@ export interface QqHostDeps {
 export interface QqHost {
   /** 路由处理：返回 null 表示「不是我的路径」，交给后面的分支 */
   handle(rest: string, method: string, body: string | undefined): Promise<unknown | null>;
+  /** 记忆面板：读/写关键记忆/立即压缩 */
+  memory(
+    action: 'get' | 'set' | 'compress',
+    groupId: string,
+    payload?: unknown,
+  ): Promise<Record<string, unknown>>;
   /** 插件卸载时调用 */
   dispose(): Promise<void>;
   /** 当前是否在跑 */
@@ -232,6 +238,26 @@ export function createQqHost(deps: QqHostDeps): QqHost {
   return {
     get running(): boolean {
       return bridge !== undefined;
+    },
+
+    /** 记忆面板的读/写/压缩（桥未启动时明确失败） */
+    async memory(
+      action: 'get' | 'set' | 'compress',
+      groupId: string,
+      payload?: unknown,
+    ): Promise<Record<string, unknown>> {
+      if (bridge === undefined) return { ok: false, message: 'QQ 连接尚未启动' };
+      if (groupId.trim() === '') return { ok: false, message: '缺少 groupId' };
+      try {
+        if (action === 'get') return { ok: true, ...bridge.memorySnapshot(groupId) };
+        if (action === 'set') {
+          const keyMemories = bridge.setKeyMemories(groupId, payload);
+          return { ok: true, keyMemories };
+        }
+        return { ok: true, ...(await bridge.compressMemoryNow(groupId)) };
+      } catch (e) {
+        return { ok: false, message: e instanceof Error ? e.message : String(e) };
+      }
     },
 
     async handle(rest: string, method: string, body: string | undefined): Promise<unknown | null> {
