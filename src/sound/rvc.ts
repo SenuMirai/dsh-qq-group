@@ -9,7 +9,7 @@
  * 上层语音链路只依赖 RvcConverter，不关心实现。
  */
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -22,6 +22,8 @@ export interface RvcWorkerConfig {
   pitch: number;
   timeoutMs: number;
   maxSeconds: number;
+  /** 临时工作目录；默认系统临时目录（插件应传用户数据目录，避开沙箱限制） */
+  tempDir?: string;
 }
 
 export type RvcResult =
@@ -47,7 +49,9 @@ export function createCommandRvcConverter(config: RvcWorkerConfig): RvcConverter
           message: `RVC 输入 ${duration.toFixed(1)} 秒，超过上限 ${config.maxSeconds} 秒`,
         };
       }
-      const dir = mkdtempSync(join(tmpdir(), 'qq-rvc-'));
+      const base = config.tempDir !== undefined && config.tempDir !== '' ? config.tempDir : tmpdir();
+      mkdirSync(base, { recursive: true });
+      const dir = mkdtempSync(join(base, 'qq-rvc-'));
       const input = join(dir, 'input.wav');
       const output = join(dir, 'output.wav');
       try {
