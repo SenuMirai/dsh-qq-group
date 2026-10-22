@@ -197,6 +197,17 @@ DSH 设置 →「QQ 群聊」→「连接」：
 
 
 
+
+
+### v1.3.0 发表情包与唱歌概率
+
+- 发图概率从「接话」移到「表情包」页靠前位置：
+  - 自动发图概率（模型想发时）；
+  - 被要求发图概率（群友明确说“发个表情包/来张图/斗图”时）；100% = 必发；
+  - 仍按仓库权重和上下文含义选图，inbox 的 0 权重不会绕过。
+- 唱歌概率从「接话」移到「语音」页。
+- 明确要图时按直接对话处理，不会被语音/唱歌分支抢走。
+
 ### v1.2.2 日记修复
 
 - 每条实际生成的回复都会写日记；模型没给 `thought` 时用占位内心记录，不再整条丢失。
@@ -430,6 +441,17 @@ Each project keeps its own license; this project borrows design ideas only and d
 
 
 
+
+
+
+### v1.3.0 sticker request and singing probability
+
+- Image probability moved to the top of the Stickers tab:
+  - normal send probability when the model wants to send;
+  - requested-send probability when someone explicitly asks for a sticker/image; 100% = always send;
+  - still picks by repository weight and context; inbox weight 0 is still excluded.
+- Singing probability moved from Chat to Voice.
+- Explicit image-send requests are treated as direct, so voice/singing branches cannot consume them first.
 
 ### v1.2.2 diary fix
 

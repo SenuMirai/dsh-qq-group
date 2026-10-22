@@ -245,6 +245,17 @@ export function asksToSeeImage(text: string): boolean {
   return mentionsImage && asks;
 }
 
+/** 群友是否在明确要求她发图/发表情包 */
+export function asksToSendImage(text: string): boolean {
+  const value = text.trim();
+  if (value === '') return false;
+  return (
+    /(?:发|来|整|给|丢|甩|上)(?:一|个|张|点|些|两)?[^，。！？\n]{0,8}(?:图|图片|照片|表情包|表情|动图|gif)/i.test(value) ||
+    /(?:图|图片|照片|表情包|表情).{0,4}(?:发|来|整|给|丢|甩)/.test(value) ||
+    /斗图/.test(value)
+  );
+}
+
 /** 文本里有没有叫到她的名字（支持多个名字，逗号/顿号/斜杠分隔） */
 export function mentionedByName(text: string, botName: string): boolean {
   const names = botName

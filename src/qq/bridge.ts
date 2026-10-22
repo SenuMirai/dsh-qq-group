@@ -28,7 +28,7 @@
  */
 
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import { policyFor, type GroupPolicy, type QqConfig } from './config';
 import { createOpenAiClient, parseReplyPlan, type ChatClient, type ChatImage } from './llm';
@@ -48,6 +48,7 @@ import { OneBotClient, asId, parseMessage } from './onebot';
 import {
   CHAT_DEBOUNCE_MS,
   asksToSeeImage,
+  asksToSendImage,
   burstGap,
   chatWindowElapsed,
   classifyTrigger,
@@ -630,6 +631,8 @@ export class QqBridge {
       message.hasImage &&
       policy.imageView !== 'off' &&
       (asksToSeeImage(message.text) || /^(看看|看下|看一下|瞅瞅|瞧瞧)$/.test(message.text.trim()));
+    // 明确要求她发图/发表情包：也按直接对话处理
+    const imageSendRequest = policy.imageEnabled && asksToSendImage(message.text);
     // 画像：所有开启群里的发言都记；主人初始 +60，白名单 +20
     const userRules = this.deps.rules?.(userId);
     const initialAffinity =
@@ -639,14 +642,14 @@ export class QqBridge {
           ? userRules.initialWhitelistAffinity ?? 20
           : 0;
     this.deps.profiles?.touch(groupId, userId, name, {
-      mention: trigger === 'at' || trigger === 'call' || imageRequest,
+      mention: trigger === 'at' || trigger === 'call' || imageRequest || imageSendRequest,
       initialAffinity,
     });
     // 引用回复她刚才那条消息 = 明确在跟她说话（比 @ 还准）
     const repliedToSelf =
       message.replyToId !== undefined && this.selfMessageIds.get(groupId)?.has(message.replyToId) === true;
     if (repliedToSelf) this.deps.profiles?.noteQuote(groupId, userId);
-    if (trigger === 'none' && !repliedToSelf && !imageRequest) return;
+    if (trigger === 'none' && !repliedToSelf && !imageRequest && !imageSendRequest) return;
 
     // 让模型判断「这条是不是在怼她」，异步扣好感，不挡回复。
     // 只对直接对她说、或明显在聊她/DeepSeek 的消息跑，避免每条都多花一次调用。
@@ -660,7 +663,7 @@ export class QqBridge {
 
     // @ 与叫名字 / 引用她：立刻回（不受去抖窗口影响，但受冷却/限流约束）
     // 「叫名字」在提示词里与 @ 同一档：都是明确的「在跟你说话」
-    if (trigger === 'at' || trigger === 'call' || repliedToSelf || imageRequest) {
+    if (trigger === 'at' || trigger === 'call' || repliedToSelf || imageRequest || imageSendRequest) {
       clearChatWindow(state);
       this.pendingTexts.delete(groupId);
       this.pendingAtOther.delete(groupId);
@@ -1105,6 +1108,7 @@ export class QqBridge {
       } catch {
         /* 窗口信息不可用时不裁剪 */
       }
+      const imageSendRequest = message !== undefined && policy.imageEnabled && asksToSendImage(message.text);
       const viewImages = this.shouldViewImages(groupId, policy, message, mode);
       const chatImages = viewImages && message !== undefined ? await this.downloadChatImages(message) : [];
       const system = groupSystemPrompt({
@@ -1119,6 +1123,7 @@ export class QqBridge {
         timeContext: this.deps.timeContext?.(),
         hasImage: message?.hasImage === true,
         canSeeImage: chatImages.length > 0,
+        imageRequested: imageSendRequest,
         ...(this.deps.stickers === undefined
           ? {}
           : {
@@ -1153,11 +1158,14 @@ export class QqBridge {
       this.lastError = undefined;
 
       let plan = parseReplyPlanSafe(result.text, policy);
+      // 明确要图时优先保证图；不要被语音/唱歌分支提前 return
+      if (imageSendRequest && plan.action !== 'text') plan = { ...plan, action: 'text' };
       // 语音概率独立掷骰：不再等模型“选 voice”。
       // 只要这次回复适合转语音，就按 voiceChance / proactiveVoiceChance 抽一次；
       // 模型原本选 voice 但没抽中，就退回文字。
       const spokenText = plan.messages.join('，');
       const voiceEligible =
+        !imageSendRequest &&
         plan.action !== 'sing' &&
         plan.sticker === undefined &&
         message?.hasImage !== true &&
@@ -1201,7 +1209,7 @@ export class QqBridge {
         });
       }
 
-      const sentCount = await this.deliver(groupId, policy, plan, now, mode);
+      const sentCount = await this.deliver(groupId, policy, plan, now, mode, imageSendRequest);
       if (sentCount > 0) {
         const stat = this.statOf(groupId);
         stat.replied += sentCount;
@@ -1237,6 +1245,7 @@ export class QqBridge {
     plan: { messages: string[]; action: 'text' | 'voice' | 'sing'; song?: string; sticker?: string },
     now: number,
     mode: SpeakMode,
+    imageRequested = false,
   ): Promise<number> {
     // 唱歌优先级最高：整段是一条语音，不用连发
     if (plan.action === 'sing' && policy.singOnRequest) {
@@ -1279,19 +1288,24 @@ export class QqBridge {
       if (mode === 'proactive') break; // 主动开口只发一条，不连发
     }
 
-    // 表情包：模型点了名、这个群允许发图、概率命中，才真发（防刷屏）
+    // 表情包：模型点名 或 群友明确要求；这个群允许发图、概率命中才真发
     const sticker = plan.sticker;
-    if (sticker !== undefined && policy.imageEnabled && Math.random() < policy.imageChance) {
-      const file = this.deps.stickers?.select?.(sticker) ?? this.deps.stickers?.resolve(sticker);
+    const stickerChance = imageRequested ? policy.requestedImageChance : policy.imageChance;
+    const wantsSticker = sticker !== undefined || imageRequested;
+    if (wantsSticker && policy.imageEnabled && stickerChance > 0 && Math.random() < stickerChance) {
+      const file = this.deps.stickers?.select?.(sticker) ?? this.deps.stickers?.resolve(sticker ?? '');
       if (file !== undefined) {
+        const label = sticker ?? basename(file);
         const imageSent = await this.sendSegments(groupId, [{ type: 'image', data: { file } }]);
         if (imageSent.ok) {
           sent += 1;
-          this.deps.stickers?.markUsed?.(sticker);
-          this.appendAssistant(groupId, `（发了个表情包：${sticker}）`, Date.now());
+          this.deps.stickers?.markUsed?.(label);
+          this.appendAssistant(groupId, `（发了个表情包：${label}）`, Date.now());
         } else {
           this.log('warn', `表情包发送失败（${imageSent.reason}）：${imageSent.message}`);
         }
+      } else if (imageRequested) {
+        this.log('warn', '对方要求发表情包，但仓库里没有可用的图');
       }
     }
     return sent;

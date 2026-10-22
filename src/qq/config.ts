@@ -113,6 +113,8 @@ export interface GroupPolicy {
   imageEnabled: boolean;
   /** 模型想发表情包时，真的发出去的概率（0~1；防刷屏） */
   imageChance: number;
+  /** 群友明确要求发图/表情包时，真的发出去的概率（0~1；100% 必发） */
+  requestedImageChance: number;
   /**
    * 什么时候把群友图片交给视觉模型：
    * off（全关）/ all（所有图）/ custom（按 imageViewModes 多选）
@@ -298,6 +300,7 @@ export function defaultGroupPolicy(): GroupPolicy {
     singOnRequest: true,
     imageEnabled: false,
     imageChance: 0.2,
+    requestedImageChance: 0.9,
     imageView: 'custom',
     imageViewModes: ['at'],
   };
@@ -578,6 +581,13 @@ export function normalizeGroupPolicy(raw: unknown, path: string, base = defaultG
     singOnRequest: bool(src.singOnRequest, `${path}.singOnRequest`, base.singOnRequest),
     imageEnabled: bool(src.imageEnabled, `${path}.imageEnabled`, base.imageEnabled),
     imageChance: num(src.imageChance, `${path}.imageChance`, base.imageChance, 0, 1),
+    requestedImageChance: num(
+      src.requestedImageChance,
+      `${path}.requestedImageChance`,
+      base.requestedImageChance,
+      0,
+      1,
+    ),
     imageView,
     imageViewModes,
     keywordChances: chanceMap(src.keywordChances, `${path}.keywordChances`, base.keywordChances),

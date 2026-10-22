@@ -47,6 +47,8 @@ export interface PromptInput {
   canSeeImage?: boolean;
   /** 可用的表情包（文件名 + 含义/标签；为空 = 这个群不发图） */
   stickers?: Array<{ file: string; tags?: string[]; description?: string }>;
+  /** 群友是否明确要求她发图/表情包 */
+  imageRequested?: boolean;
 }
 
 /** 场合不同，任务不同 */
@@ -134,6 +136,9 @@ export function groupSystemPrompt(input: PromptInput): string {
       parts.push(`- ${sticker.file}：${desc}${tags === '' ? '' : `（${tags}）`}`);
     }
     parts.push('只有含义和当前聊天气氛**明显匹配**时才选；不确定、或没有合适的，就留空，宁可不发。');
+    if (input.imageRequested === true) {
+      parts.push('对方这次**明确要求你发图/表情包**：必须从列表里选一张最符合当前语境的，填进 sticker；action 用 text。');
+    }
   }
 
   const actions: string[] = ['text（发文字）'];
