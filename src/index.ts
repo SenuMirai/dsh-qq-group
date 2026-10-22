@@ -132,7 +132,7 @@ const DEFAULT_SETTINGS: Settings = {
   stickerMaxMB: 200,
   autoStart: true,
   autoLaunchNapcat: true,
-  napcatLauncher: '',
+  napcatLauncher: 'C:\\DSHwork\\start-napcat.bat',
   whitelist: [],
   whitelistFloor: 95,
   blacklist: [],
