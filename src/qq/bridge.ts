@@ -1765,7 +1765,11 @@ export class QqBridge {
       const quoteTarget =
         policy.quoteWhenSeparated &&
         message !== undefined &&
-        this.lastInboundId.get(groupId) !== message.messageId
+        this.lastInboundId.get(groupId) !== message.messageId &&
+        message.text.trim() !== '' &&
+        (message.files?.length ?? 0) === 0 &&
+        (message.forwards?.length ?? 0) === 0 &&
+        message.hasVoice !== true
           ? message.messageId
           : undefined;
       const sentCount = await this.deliver(groupId, policy, plan, now, mode, imageSendRequest, selfieRequest, selectedSelfie, quoteTarget);
@@ -1850,10 +1854,15 @@ export class QqBridge {
         this.log('debug', `连发间隔 ${gap} ms`);
         await new Promise<void>((resolve) => setTimeout(resolve, gap));
       }
-      const result = await this.sendSegments(
+      let result = await this.sendSegments(
         groupId,
         index === 0 ? [...quoteSegment, { type: 'text', data: { text } }] : [{ type: 'text', data: { text } }],
       );
+      if (!result.ok && index === 0 && quoteSegment.length > 0) {
+        // 某些消息类型不能作为引用目标；失败时去掉引用重发，保证正文能发出去。
+        this.log('warn', `带引用发送失败，改发纯文字：${result.message}`);
+        result = await this.sendSegments(groupId, [{ type: 'text', data: { text } }]);
+      }
       if (!result.ok) {
         this.log('warn', `发送失败（${result.reason}）：${result.message}`);
         break;
@@ -1943,12 +1952,16 @@ export class QqBridge {
       this.recordError(`音频落盘失败：${e instanceof Error ? e.message : String(e)}`);
       return false;
     }
-    const sent = await this.sendSegments(
+    let sent = await this.sendSegments(
       groupId,
       quoteTo === undefined
         ? [{ type: 'record', data: { file: path } }]
         : [{ type: 'reply', data: { id: quoteTo } }, { type: 'record', data: { file: path } }],
     );
+    if (!sent.ok && quoteTo !== undefined) {
+      this.log('warn', `带引用语音发送失败，改发不带引用：${sent.message}`);
+      sent = await this.sendSegments(groupId, [{ type: 'record', data: { file: path } }]);
+    }
     if (!sent.ok) {
       this.log('warn', `语音发送失败（${sent.reason}）：${sent.message}`);
       return false;
@@ -2015,11 +2028,19 @@ export class QqBridge {
         'info',
         `唱歌完成：${score.title}，${rendered.report.duration.toFixed(1)} 秒，${rendered.report.notes} 个音`,
       );
-      return await this.sendSegments(groupId, [
+      let sung = await this.sendSegments(groupId, [
         ...(quoteTo === undefined ? [] : [{ type: 'reply', data: { id: quoteTo } }]),
         { type: 'text', data: { text: `♪ ${score.title}` } },
         { type: 'record', data: { file: path } },
       ]);
+      if (!sung.ok && quoteTo !== undefined) {
+        this.log('warn', `带引用唱歌发送失败，改发不带引用：${sung.message}`);
+        sung = await this.sendSegments(groupId, [
+          { type: 'text', data: { text: `♪ ${score.title}` } },
+          { type: 'record', data: { file: path } },
+        ]);
+      }
+      return sung;
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       this.recordError(`唱歌异常：${message}`);
