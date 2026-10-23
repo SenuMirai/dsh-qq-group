@@ -13,7 +13,7 @@
 
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { homedir } from 'node:os';
 import { basename, dirname, extname, join } from 'node:path';
@@ -328,7 +328,27 @@ function readSettings(root: string): Settings {
 
 function writeSettings(root: string, settings: Settings): void {
   mkdirSync(root, { recursive: true });
-  writeFileSync(settingsPath(root), `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
+  const path = settingsPath(root);
+  if (existsSync(path)) {
+    try {
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      copyFileSync(path, `${path}.bak-${stamp}`);
+      const backups = readdirSync(root)
+        .filter((name) => name.startsWith('settings.json.bak-'))
+        .sort()
+        .reverse();
+      for (const old of backups.slice(10)) {
+        try {
+          unlinkSync(`${root}/${old}`);
+        } catch {
+          /* 备份清理失败不影响保存 */
+        }
+      }
+    } catch {
+      /* 备份失败不阻塞保存 */
+    }
+  }
+  writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
 }
 
 /** 主动/被动：直接改群策略里的插话与冷场主动开口（其余概率沿用 qq.json）。 */
@@ -1446,22 +1466,33 @@ export function apply(ctx: any): void {
         }
         if (patch.settings !== undefined) {
           const current = readSettings(root);
+          const incomingPersonas = Array.isArray(patch.settings.personas)
+            ? patch.settings.personas
+                .filter((item): item is Record<string, unknown> => item !== null && typeof item === 'object')
+                .map((item) => ({
+                  id: typeof item.id === 'string' && item.id !== '' ? item.id : `persona-${Math.random().toString(36).slice(2, 10)}`,
+                  name: typeof item.name === 'string' ? item.name.slice(0, 60) : '未命名',
+                  text: typeof item.text === 'string' ? item.text.slice(0, 20_000) : '',
+                }))
+                .slice(0, 30)
+            : undefined;
+          // 旧客户端/旧页面保存时可能不带 personas；不要因此清空已有卡片。
+          const personaCards =
+            incomingPersonas === undefined
+              ? current.personas
+              : incomingPersonas.length === 0 && current.personas.length > 0
+                ? current.personas
+                : incomingPersonas;
+          const requestedActive = typeof patch.settings.activePersonaId === 'string'
+            ? patch.settings.activePersonaId
+            : current.activePersonaId;
+          const activePersonaId = personaCards.some((card) => card.id === requestedActive)
+            ? requestedActive
+            : (personaCards[0]?.id ?? '');
           const next: Settings = {
             persona: typeof patch.settings.persona === 'string' ? patch.settings.persona : current.persona,
-            personas: Array.isArray(patch.settings.personas)
-              ? patch.settings.personas
-                  .filter((item): item is Record<string, unknown> => item !== null && typeof item === 'object')
-                  .map((item) => ({
-                    id: typeof item.id === 'string' && item.id !== '' ? item.id : `persona-${Math.random().toString(36).slice(2, 10)}`,
-                    name: typeof item.name === 'string' ? item.name.slice(0, 60) : '未命名',
-                    text: typeof item.text === 'string' ? item.text.slice(0, 20_000) : '',
-                  }))
-                  .slice(0, 30)
-              : current.personas,
-            activePersonaId:
-              typeof patch.settings.activePersonaId === 'string'
-                ? patch.settings.activePersonaId
-                : current.activePersonaId,
+            personas: personaCards,
+            activePersonaId,
             mode: patch.settings.mode === 'proactive' ? 'proactive' : patch.settings.mode === 'passive' ? 'passive' : current.mode,
             model:
               patch.settings.model &&
