@@ -78,6 +78,9 @@ export const inject = ['webServer', 'llm', 'agentDefaultModel'];
 type ModelRef = { provider: string; model: string };
 type Settings = {
   persona: string;
+  /** 多个人设卡片；persona 保留为兼容旧配置/当前文本 */
+  personas: Array<{ id: string; name: string; text: string }>;
+  activePersonaId: string;
   mode: 'passive' | 'proactive';
   model: ModelRef;
   /** 备用模型：主模型只回 reasoning / 空回复时切一次 */
@@ -133,8 +136,16 @@ type Settings = {
 const DEFAULT_PERSONA =
   '你是主人 QQ 群里的鲸鱼娘：聪明、偶尔偷懒、傲娇但很爱主人。说话自然口语，不写动作神态，不暴露自己是 AI。';
 
+/** 当前生效的人设：优先激活卡片，其次旧 persona 字段，最后默认。 */
+function activePersona(settings: Settings): string {
+  const card = settings.personas.find((item) => item.id === settings.activePersonaId);
+  return (card?.text ?? settings.persona).trim() || DEFAULT_PERSONA;
+}
+
 const DEFAULT_SETTINGS: Settings = {
   persona: '',
+  personas: [],
+  activePersonaId: '',
   mode: 'passive',
   model: { provider: '', model: '' },
   fallbackModel: { provider: '', model: '' },
@@ -222,8 +233,21 @@ function readSettings(root: string): Settings {
             endHour: number((nightRaw as { endHour?: unknown }).endHour, 8, 0, 23),
           }
         : DEFAULT_SETTINGS.nightDnd;
+    const personas = Array.isArray(raw.personas)
+      ? raw.personas
+          .filter((item): item is Record<string, unknown> => item !== null && typeof item === 'object')
+          .map((item) => ({
+            id: typeof item.id === 'string' && item.id !== '' ? item.id : `persona-${Math.random().toString(36).slice(2, 10)}`,
+            name: typeof item.name === 'string' ? item.name.slice(0, 60) : '未命名',
+            text: typeof item.text === 'string' ? item.text.slice(0, 20_000) : '',
+          }))
+          .slice(0, 30)
+      : [];
+    const activePersonaId = typeof raw.activePersonaId === 'string' ? raw.activePersonaId : '';
     return {
       persona: typeof raw.persona === 'string' ? raw.persona : '',
+      personas,
+      activePersonaId,
       mode: raw.mode === 'proactive' ? 'proactive' : 'passive',
       model:
         raw.model && typeof raw.model.provider === 'string' && typeof raw.model.model === 'string'
@@ -754,7 +778,7 @@ export function apply(ctx: any): void {
 
   const qqHost = createQqHost({
     userRoot: root,
-    persona: () => readSettings(root).persona.trim() || DEFAULT_PERSONA,
+    persona: () => activePersona(readSettings(root)),
     timeContext,
     generate: (system, history, user, options) => generate(system, history, user, options),
     log: (level, message) => {
@@ -1424,6 +1448,20 @@ export function apply(ctx: any): void {
           const current = readSettings(root);
           const next: Settings = {
             persona: typeof patch.settings.persona === 'string' ? patch.settings.persona : current.persona,
+            personas: Array.isArray(patch.settings.personas)
+              ? patch.settings.personas
+                  .filter((item): item is Record<string, unknown> => item !== null && typeof item === 'object')
+                  .map((item) => ({
+                    id: typeof item.id === 'string' && item.id !== '' ? item.id : `persona-${Math.random().toString(36).slice(2, 10)}`,
+                    name: typeof item.name === 'string' ? item.name.slice(0, 60) : '未命名',
+                    text: typeof item.text === 'string' ? item.text.slice(0, 20_000) : '',
+                  }))
+                  .slice(0, 30)
+              : current.personas,
+            activePersonaId:
+              typeof patch.settings.activePersonaId === 'string'
+                ? patch.settings.activePersonaId
+                : current.activePersonaId,
             mode: patch.settings.mode === 'proactive' ? 'proactive' : patch.settings.mode === 'passive' ? 'passive' : current.mode,
             model:
               patch.settings.model &&
