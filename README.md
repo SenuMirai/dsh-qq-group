@@ -213,6 +213,15 @@ DSH 设置 →「QQ 群聊」→「连接」：
 
 
 
+
+
+### v1.9.1 试听与明确语音/唱歌
+
+- 试听按钮会应用当前 RVC 设置（包括未保存的模型/设备/音调）；失败时播放原音并提示。
+- 明确要求发语音/说句话/听听声音时，按「被要求发语音概率」触发（默认 95%，100% 必发）。
+- 明确要求唱歌/点歌/来一首时，按「被要求唱歌概率」触发（默认 90%，100% 必唱）。
+- 修复模型自己选唱歌时 singChance 未生效的问题。
+
 ### v1.9.0 RVC 模型库与 780M
 
 - 语音页自动扫描模型目录，列出 .pth/.onnx + index；不再手填长路径。
@@ -527,6 +536,15 @@ Each project keeps its own license; this project borrows design ideas only and d
 
 
 
+
+
+
+### v1.9.1 Preview and explicit voice/singing
+
+- The preview button now applies the current RVC settings, including unsaved model/device/pitch; on failure it plays the original voice and reports why.
+- Explicit "send a voice message / say something / let me hear your voice" uses the configurable requested-voice chance (default 95%, 100% = always).
+- Explicit "sing / request a song / sing a song" uses the configurable requested-singing chance (default 90%, 100% = always).
+- Fixed singChance not being applied when the model chose to sing by itself.
 
 ### v1.9.0 RVC model library and 780M
 

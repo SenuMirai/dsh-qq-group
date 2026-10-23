@@ -145,12 +145,16 @@ export interface GroupPolicy {
   proactive: ProactiveConfig;
   /** 回复里带语音的概率（0~1；独立掷骰，不再依赖模型选 action=voice） */
   voiceChance: number;
+  /** 被明确要求发语音时的概率（0~1；100% = 必发） */
+  requestedVoiceChance: number;
   /** 超过多少字不转语音（0 = 不限制） */
   voiceMaxChars: number;
   /** 主动开口时用语音的概率（0~1） */
   proactiveVoiceChance: number;
   /** 回复里唱歌的概率（0~1，仅当被要求或概率命中） */
   singChance: number;
+  /** 被明确要求唱歌时的概率（0~1；100% = 必唱） */
+  requestedSingChance: number;
   /** 被明确要求唱歌时是否唱 */
   singOnRequest: boolean;
   /** 是否允许在群里发图（表情包） */
@@ -392,9 +396,11 @@ export function defaultGroupPolicy(): GroupPolicy {
       trial: true,
     },
     voiceChance: 0.25,
+    requestedVoiceChance: 0.95,
     voiceMaxChars: 80,
     proactiveVoiceChance: 0.1,
     singChance: 0.04,
+    requestedSingChance: 0.9,
     singOnRequest: true,
     imageEnabled: false,
     imageChance: 0.2,
@@ -711,6 +717,7 @@ export function normalizeGroupPolicy(raw: unknown, path: string, base = defaultG
       trial: pro.trial !== false,
     },
     voiceChance: num(src.voiceChance, `${path}.voiceChance`, base.voiceChance, 0, 1),
+    requestedVoiceChance: num(src.requestedVoiceChance, `${path}.requestedVoiceChance`, base.requestedVoiceChance, 0, 1),
     voiceMaxChars: num(src.voiceMaxChars, `${path}.voiceMaxChars`, base.voiceMaxChars, 0, 500),
     proactiveVoiceChance: num(
       src.proactiveVoiceChance,
@@ -720,6 +727,7 @@ export function normalizeGroupPolicy(raw: unknown, path: string, base = defaultG
       1,
     ),
     singChance: num(src.singChance, `${path}.singChance`, base.singChance, 0, 1),
+    requestedSingChance: num(src.requestedSingChance, `${path}.requestedSingChance`, base.requestedSingChance, 0, 1),
     singOnRequest: bool(src.singOnRequest, `${path}.singOnRequest`, base.singOnRequest),
     imageEnabled: bool(src.imageEnabled, `${path}.imageEnabled`, base.imageEnabled),
     imageChance: num(src.imageChance, `${path}.imageChance`, base.imageChance, 0, 1),

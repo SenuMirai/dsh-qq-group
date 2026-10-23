@@ -286,6 +286,33 @@ export function asksForSelfie(text: string, extraKeywords: readonly string[] = [
   return refersToHer && asks;
 }
 
+/**
+ * 是否在明确要求发语音。
+ * 只识别“说/发/来/听”这类请求，不把普通提到“语音”当成要求。
+ */
+export function asksForVoice(text: string): boolean {
+  const value = text.trim();
+  if (value === '') return false;
+  return /(?:发|来|整)(?:个|条|段|一句)?语音|语音(?:说|回复|来|发)|用语音|说句话|说一句|听听(?:你的)?声音|让我听听|说话听听/.test(value);
+}
+
+/** 是否在明确要求唱歌 */
+export function asksForSong(text: string): boolean {
+  const value = text.trim();
+  if (value === '') return false;
+  return /(?:唱|来)(?:首|个|一首|一段)?歌|点歌|唱歌|唱一个|唱一段|来首歌|来(?:一|两)?首[^，。！？\s]{1,20}|给(?:我|大家)?唱/.test(value);
+}
+
+/** 从“唱首小星星”里尽量提取歌名；提取不到就交给模型 */
+export function songTitleFrom(text: string): string | undefined {
+  const value = text.trim();
+  const match = /(?:唱|来)(?:首|个|一首|一段)?\s*([\u4e00-\u9fffA-Za-z0-9][\u4e00-\u9fffA-Za-z0-9\s·-]{0,30})/.exec(value);
+  if (match === null) return undefined;
+  const title = match[1].trim().replace(/[，。！？,.!?].*$/, '').trim();
+  if (title === '' || title === '歌' || title === '唱歌') return undefined;
+  return title.slice(0, 30);
+}
+
 /** 文本里有没有叫到她的名字（支持多个名字，逗号/顿号/斜杠分隔） */
 export function mentionedByName(text: string, botName: string): boolean {
   const names = botName

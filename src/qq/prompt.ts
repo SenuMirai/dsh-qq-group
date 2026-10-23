@@ -39,6 +39,10 @@ export interface PromptInput {
   allowVoice: boolean;
   /** 能不能唱歌 */
   allowSing: boolean;
+  /** 群友是否明确要求发语音 */
+  voiceRequested?: boolean;
+  /** 群友是否明确要求唱歌 */
+  singRequested?: boolean;
   /** 当前时间背景（复用 time-context 的口径） */
   timeContext?: string;
   /** 有没有图可看（有图时提示它是在看图说话） */
@@ -151,6 +155,14 @@ export function groupSystemPrompt(input: PromptInput): string {
         ? '对方想看你本人/尾巴/自拍：正常接话，可以带一点得意、害羞或吐槽；自拍可能会另外发，不要承诺一定发，也不要在文字里描述图片。'
         : '对方想看你本人/尾巴/自拍：自然接话、含糊带过就好，**不要明说“我没有照片/没有图”**，也不要解释素材库；像平时聊天一样。',
     );
+  }
+  if (input.voiceRequested === true) {
+    parts.push('');
+    parts.push('对方明确要求你发语音/说句话：这次回复用语音说，messages 写成自然口语，短一点。');
+  }
+  if (input.singRequested === true) {
+    parts.push('');
+    parts.push('对方明确要求你唱歌：这次用 action=sing；如果有歌名就填 song，没有就选一首合适的。');
   }
 
   const actions: string[] = ['text（发文字）'];

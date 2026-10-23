@@ -16,10 +16,10 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { homedir } from 'node:os';
-import { basename, extname, join } from 'node:path';
+import { basename, dirname, extname, join } from 'node:path';
 
 import { BlockAssembler, createAssistantMessage, createUserMessage } from '@deepseek-ai/dsh-llm';
-import type { GroupPolicy, QqConfig } from './qq/config';
+import type { GroupPolicy, QqConfig, QqRvcConfig } from './qq/config';
 import type { DiaryEntry, ProfileStore } from './qq/bridge';
 import type { ObSegment } from './qq/types';
 import {
@@ -43,6 +43,7 @@ import {
 } from './qq/selfies';
 import { DEFAULT_SCORE_WEIGHTS, type ScoreRules, type ScoreWeights } from './qq/triggers';
 import { scanRvcModels } from './qq/rvc-models';
+import { createCommandRvcConverter } from './sound/rvc';
 import {
   getProfile,
   listProfiles,
@@ -1014,9 +1015,15 @@ export function apply(ctx: any): void {
       if (rest === 'voice-preview') {
         if (method !== 'POST') return send(405, { error: 'method not allowed' });
         const payload = (JSON.parse(body || 'null') as
-          | { text?: unknown; voice?: unknown; rate?: unknown; pitch?: unknown; volume?: unknown }
+          | { text?: unknown; voice?: unknown; rate?: unknown; pitch?: unknown; volume?: unknown; rvc?: unknown }
           | null) ?? {};
-        const tts = readQqConfig(qqConfigPath(root)).config.tts;
+        const cfg = readQqConfig(qqConfigPath(root)).config;
+        const rvcOverride =
+          payload.rvc !== null && typeof payload.rvc === 'object'
+            ? (payload.rvc as Partial<QqRvcConfig>)
+            : {};
+        const rvc = { ...cfg.rvc, ...rvcOverride };
+        const tts = cfg.tts;
         const text =
           typeof payload.text === 'string' && payload.text.trim() !== ''
             ? payload.text.trim().slice(0, 120)
@@ -1028,11 +1035,37 @@ export function apply(ctx: any): void {
           volume: typeof payload.volume === 'string' && payload.volume !== '' ? payload.volume : tts.volume,
         });
         if (!result.ok) return send(200, { ok: false, message: describeFailure(result) });
-        const wav = encodeWave(result.pcm);
+        let wav = encodeWave(result.pcm);
+        let rvcWarning: string | undefined;
+        if (rvc.enabled) {
+          const modelPath = rvc.modelPath || cfg.sing.rvcModel;
+          const useOnnx =
+            rvc.device !== 'cpu' && modelPath.toLowerCase().endsWith('.onnx');
+          const baseDir = rvc.modelsDir || dirname(modelPath);
+          const converter = createCommandRvcConverter({
+            pythonPath: useOnnx
+              ? rvc.onnxPythonPath || join(baseDir, 'venv-onnx', 'Scripts', 'python.exe')
+              : rvc.pythonPath,
+            scriptPath: useOnnx
+              ? rvc.onnxScriptPath || join(baseDir, 'rvc_onnx_worker.py')
+              : rvc.scriptPath,
+            modelPath,
+            indexPath: rvc.indexPath,
+            device: useOnnx ? 'dml' : 'cpu',
+            pitch: rvc.pitch,
+            timeoutMs: rvc.timeoutMs,
+            maxSeconds: rvc.maxSeconds,
+            tempDir: join(root, 'cache', 'rvc'),
+          });
+          const converted = await converter.convert(wav);
+          if (converted.ok) wav = converted.wav;
+          else rvcWarning = converted.message;
+        }
         return send(200, {
           ok: true,
           mime: 'audio/wav',
           base64: Buffer.from(wav).toString('base64'),
+          ...(rvcWarning === undefined ? { rvc: rvc.enabled } : { rvc: false, rvcWarning }),
         });
       }
 

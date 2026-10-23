@@ -79,6 +79,9 @@ import {
   asksToSeeImage,
   asksToSendImage,
   asksForSelfie,
+  asksForVoice,
+  asksForSong,
+  songTitleFrom,
   burstGap,
   chatWindowElapsed,
   classifyTrigger,
@@ -855,6 +858,9 @@ export class QqBridge {
     const selfieRequest =
       policy.selfieEnabled && !imageRequest && asksForSelfie(message.text, policy.selfieKeywords);
     const imageSendRequest = rawImageSendRequest && !selfieRequest;
+    // 明确要求发语音/唱歌：按直接对话处理
+    const voiceRequest = asksForVoice(message.text);
+    const singRequest = asksForSong(message.text);
     // 画像：所有开启群里的发言都记；主人初始 +60，白名单 +20
     const userRules = this.deps.rules?.(userId);
     const initialAffinity =
@@ -864,14 +870,14 @@ export class QqBridge {
           ? userRules.initialWhitelistAffinity ?? 20
           : 0;
     this.deps.profiles?.touch(groupId, userId, name, {
-      mention: trigger === 'at' || trigger === 'call' || imageRequest || imageSendRequest || selfieRequest,
+      mention: trigger === 'at' || trigger === 'call' || imageRequest || imageSendRequest || selfieRequest || voiceRequest || singRequest,
       initialAffinity,
     });
     // 引用回复她刚才那条消息 = 明确在跟她说话（比 @ 还准）
     const repliedToSelf =
       message.replyToId !== undefined && this.selfMessageIds.get(groupId)?.has(message.replyToId) === true;
     if (repliedToSelf) this.deps.profiles?.noteQuote(groupId, userId);
-    if (trigger === 'none' && !repliedToSelf && !imageRequest && !imageSendRequest && !selfieRequest) return;
+    if (trigger === 'none' && !repliedToSelf && !imageRequest && !imageSendRequest && !selfieRequest && !voiceRequest && !singRequest) return;
 
     // 让模型判断「这条是不是在怼她」，异步扣好感，不挡回复。
     // 只对直接对她说、或明显在聊她/DeepSeek 的消息跑，避免每条都多花一次调用。
@@ -885,7 +891,7 @@ export class QqBridge {
 
     // @ 与叫名字 / 引用她：立刻回（不受去抖窗口影响，但受冷却/限流约束）
     // 「叫名字」在提示词里与 @ 同一档：都是明确的「在跟你说话」
-    if (trigger === 'at' || trigger === 'call' || repliedToSelf || imageRequest || imageSendRequest || selfieRequest) {
+    if (trigger === 'at' || trigger === 'call' || repliedToSelf || imageRequest || imageSendRequest || selfieRequest || voiceRequest || singRequest) {
       clearChatWindow(state);
       this.pendingTexts.delete(groupId);
       this.pendingAtOther.delete(groupId);
@@ -1428,6 +1434,8 @@ export class QqBridge {
         !message.hasImage &&
         asksForSelfie(message.text, policy.selfieKeywords);
       const imageSendRequest = rawImageSendRequest && !selfieRequest;
+      const voiceRequest = message !== undefined && asksForVoice(message.text);
+      const singRequest = message !== undefined && asksForSong(message.text);
       const selfieAvailable = (this.deps.selfies?.list().length ?? 0) > 0;
       const viewImages = this.shouldViewImages(groupId, policy, message, mode);
       const chatImages = viewImages && message !== undefined ? await this.downloadChatImages(message) : [];
@@ -1438,8 +1446,10 @@ export class QqBridge {
         transcript: transcript(turns, this.config.selfName, now),
         ...(message === undefined || message.text === '' ? {} : { incoming: `${message.name}：${message.text}` }),
         burstRange: [policy.burst.min, policy.burst.max],
-        allowVoice: policy.voiceChance > 0 || policy.proactiveVoiceChance > 0,
+        allowVoice: policy.voiceChance > 0 || policy.proactiveVoiceChance > 0 || policy.requestedVoiceChance > 0,
         allowSing: policy.singOnRequest,
+        voiceRequested: voiceRequest,
+        singRequested: singRequest,
         timeContext: this.deps.timeContext?.(),
         hasImage: message?.hasImage === true,
         canSeeImage: chatImages.length > 0,
@@ -1480,25 +1490,51 @@ export class QqBridge {
       this.lastError = undefined;
 
       let plan = parseReplyPlanSafe(result.text, policy);
+      // 明确要歌：强制 singing 分支，并按 requestedSingChance 掷骰
+      const requestedSong = singRequest && message !== undefined ? songTitleFrom(message.text) : undefined;
+      if (singRequest) {
+        if (policy.singOnRequest) {
+          plan = {
+            ...plan,
+            action: 'sing',
+            ...(requestedSong === undefined ? {} : { song: requestedSong }),
+          };
+          if (Math.random() >= policy.requestedSingChance) {
+            this.log('info', `群 ${groupId} 被要求唱歌，但请求唱歌概率未命中（${Math.round(policy.requestedSingChance * 100)}%），改回文字`);
+            plan = { ...plan, action: 'text' };
+          }
+        } else {
+          this.log('info', `群 ${groupId} 被要求唱歌，但 singOnRequest 关闭`);
+          plan = { ...plan, action: 'text' };
+        }
+      } else if (plan.action === 'sing' && Math.random() >= policy.singChance) {
+        // 模型自己选唱时，仍然受 singChance 约束；这是之前漏掉的
+        this.log('debug', `群 ${groupId} 模型想唱歌，但 singChance 未命中`);
+        plan = { ...plan, action: 'text' };
+      }
       // 明确要图/要自拍时优先保证图；不要被语音/唱歌分支提前 return
-      if ((imageSendRequest || selfieRequest) && plan.action !== 'text') plan = { ...plan, action: 'text' };
+      if ((imageSendRequest || selfieRequest) && !singRequest && plan.action !== 'text') plan = { ...plan, action: 'text' };
       const selectedSelfie = selfieRequest && message !== undefined ? this.deps.selfies?.pick(message.text) : undefined;
       // 语音概率独立掷骰：不再等模型“选 voice”。
-      // 只要这次回复适合转语音，就按 voiceChance / proactiveVoiceChance 抽一次；
-      // 模型原本选 voice 但没抽中，就退回文字。
+      // 被明确要求发语音时用 requestedVoiceChance；否则用普通 voiceChance。
       const spokenText = plan.messages.join('，');
       const voiceEligible =
         !imageSendRequest &&
         !selfieRequest &&
+        !singRequest &&
         plan.action !== 'sing' &&
-        plan.sticker === undefined &&
-        message?.hasImage !== true &&
-        (policy.voiceMaxChars === 0 || spokenText.length <= policy.voiceMaxChars) &&
-        !/https?:\/\/|```/.test(spokenText);
+        (voiceRequest || plan.sticker === undefined) &&
+        (voiceRequest || message?.hasImage !== true) &&
+        (voiceRequest || policy.voiceMaxChars === 0 || spokenText.length <= policy.voiceMaxChars) &&
+        (voiceRequest || !/https?:\/\/|```/.test(spokenText));
       if (plan.action === 'voice' && !voiceEligible) {
         plan = { ...plan, action: 'text' };
       } else if (voiceEligible) {
-        const chance = mode === 'proactive' ? policy.proactiveVoiceChance : policy.voiceChance;
+        const chance = voiceRequest
+          ? policy.requestedVoiceChance
+          : mode === 'proactive'
+            ? policy.proactiveVoiceChance
+            : policy.voiceChance;
         const action = chooseVoiceAction(plan.action === 'voice' ? 'voice' : 'text', true, chance, Math.random());
         if (action !== plan.action) plan = { ...plan, action };
       }
