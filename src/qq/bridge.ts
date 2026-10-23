@@ -1724,6 +1724,9 @@ export class QqBridge {
       rate: tts.rate,
       pitch: tts.pitch,
       volume: tts.volume,
+      provider: tts.provider,
+      endpoint: tts.endpoint,
+      style: tts.style,
     });
     if (!result.ok) {
       this.recordError(`语音合成失败：${describeFailure(result)}`);
@@ -1775,6 +1778,9 @@ export class QqBridge {
             const result = await speaker.speak(text, {
               voice: this.config.tts.voice,
               rate: this.config.tts.rate,
+              provider: this.config.tts.provider,
+              endpoint: this.config.tts.endpoint,
+              style: this.config.tts.style,
             });
             if (!result.ok) return { ok: false as const, reason: result.reason, message: describeFailure(result) };
             return { ok: true as const, audio: result.pcm };

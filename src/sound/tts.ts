@@ -26,6 +26,12 @@ export interface SpeakOptions {
   rate?: string;
   pitch?: string;
   volume?: string;
+  /** edge = 内置；cosyvoice/indextts = 本地 HTTP 网关 */
+  provider?: 'edge' | 'cosyvoice' | 'indextts';
+  /** 本地 TTS 网关地址 */
+  endpoint?: string;
+  /** 情感/语气/风格描述（本地网关使用） */
+  style?: string;
   /** 跳过缓存（调试用） */
   noCache?: boolean;
 }
@@ -55,7 +61,7 @@ export const DEFAULT_CACHE_BYTES = 200 * 1024 * 1024;
 
 /** 缓存键：参数不同就是不同的音频，必须全进哈希 */
 export function cacheKey(text: string, options: SpeakOptions): string {
-  const material = [text, options.voice ?? '', options.rate ?? '', options.pitch ?? '', options.volume ?? ''].join('\u0001');
+  const material = [text, options.voice ?? '', options.rate ?? '', options.pitch ?? '', options.volume ?? '', options.provider ?? 'edge', options.style ?? ''].join('\u0001');
   return createHash('sha1').update(material, 'utf8').digest('hex');
 }
 
@@ -169,6 +175,35 @@ export function writeWavFile(path: string, bytes: Uint8Array): void {
  * 与宿主的 `synthesize()` 关系：**完全复用**，不另起一套 Python 进程。
  * 好处是热启动状态共享——桌宠刚说完话，群里再说话不用重新付 2 秒冷启动。
  */
+async function synthesizeExternal(
+  endpoint: string,
+  text: string,
+  style: string,
+): Promise<TtsResult> {
+  const url = endpoint.trim().replace(/\/+$/, '') + '/tts';
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 180_000);
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text, style }),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!response.ok) {
+      return { ok: false, reason: 'error', message: `本地 TTS 网关 ${response.status}：${await response.text()}` };
+    }
+    const audio = new Uint8Array(await response.arrayBuffer());
+    if (audio.length < 12 || audio[0] !== 0x52 || audio[1] !== 0x49 || audio[2] !== 0x46 || audio[3] !== 0x46) {
+      return { ok: false, reason: 'error', message: '本地 TTS 网关没有返回 WAV' };
+    }
+    return { ok: true, audio };
+  } catch (e) {
+    return { ok: false, reason: 'error', message: `本地 TTS 网关不可用：${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
 export class Speaker {
   private readonly userRoot: string;
   private readonly cache: CacheOptions;
@@ -215,12 +250,16 @@ export class Speaker {
       }
     }
 
-    const result: TtsResult = await hostSynthesize(this.userRoot, trimmed, {
-      voice: options.voice,
-      rate: options.rate,
-      pitch: options.pitch,
-      volume: options.volume,
-    });
+    const provider = options.provider ?? 'edge';
+    const result: TtsResult =
+      provider === 'edge'
+        ? await hostSynthesize(this.userRoot, trimmed, {
+            voice: options.voice,
+            rate: options.rate,
+            pitch: options.pitch,
+            volume: options.volume,
+          })
+        : await synthesizeExternal(options.endpoint ?? '', trimmed, options.style ?? '');
     if (!result.ok) return result;
     this.synthesized += 1;
 

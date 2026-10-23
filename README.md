@@ -219,6 +219,16 @@ DSH 设置 →「QQ 群聊」→「连接」：
 
 
 
+
+
+### v1.10.0 本地 TTS 后端列表
+
+- 语音页新增后端选择：Edge TTS / CosyVoice2 / IndexTTS-2.5。
+- 新增本地 TTS HTTP 网关协议：POST /tts，JSON {text, style}，返回 WAV。
+- CosyVoice2 网关已实测；CPU 上 8.7 秒语音约 60 秒生成。
+- 本地后端支持风格/情感描述；失败明确报错，Edge 仍是默认快速回退。
+- IndexTTS-2.5 选项已预留，模型服务尚未部署。
+
 ### v1.9.3 明确语音/唱歌触发修复
 
 - 修复“你唱首歌来听听”误提取歌名“歌来听听”导致唱歌失败、退回文字；无明确歌名时使用默认曲目。
@@ -560,6 +570,16 @@ Each project keeps its own license; this project borrows design ideas only and d
 
 
 
+
+
+
+### v1.10.0 Local TTS backend list
+
+- Voice tab now switches between Edge TTS / CosyVoice2 / IndexTTS-2.5.
+- Added local TTS HTTP gateway protocol: POST /tts, JSON {text, style}, returns WAV.
+- CosyVoice2 gateway verified; 8.7s speech takes about 60s on CPU.
+- Local backends accept style/emotion text; failures are explicit, Edge remains the fast default.
+- IndexTTS-2.5 option is reserved; its model service is not deployed yet.
 
 ### v1.9.3 Explicit voice/singing fixes
 

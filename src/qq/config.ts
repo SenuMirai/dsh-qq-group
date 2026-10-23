@@ -207,6 +207,12 @@ export interface QqTtsConfig {
   rate: string;
   pitch: string;
   volume: string;
+  /** edge = 内置 edge-tts；cosyvoice/indextts = 本地 HTTP 网关 */
+  provider: 'edge' | 'cosyvoice' | 'indextts';
+  /** 本地 TTS 网关，如 http://127.0.0.1:50121 */
+  endpoint: string;
+  /** 情感/语气/风格描述（本地网关使用） */
+  style: string;
   /** 显式指定 Python 解释器；空 = 自动探测 */
   pythonPath: string;
   /** 语音缓存目录（空 = 用户目录下的 cache/tts） */
@@ -468,6 +474,9 @@ export function defaultConfig(): QqConfig {
       rate: '+0%',
       pitch: '+0Hz',
       volume: '+0%',
+      provider: 'edge',
+      endpoint: 'http://127.0.0.1:50121',
+      style: '',
       pythonPath: '',
       cacheDir: '',
     },
@@ -831,6 +840,9 @@ export function normalizeConfig(raw: unknown): QqConfig {
       rate: str(ttsSrc.rate, 'tts.rate', base.tts.rate),
       pitch: str(ttsSrc.pitch, 'tts.pitch', base.tts.pitch),
       volume: str(ttsSrc.volume, 'tts.volume', base.tts.volume),
+      provider: enumOf(ttsSrc.provider, 'tts.provider', base.tts.provider, ['edge', 'cosyvoice', 'indextts'] as const),
+      endpoint: str(ttsSrc.endpoint, 'tts.endpoint', base.tts.endpoint),
+      style: str(ttsSrc.style, 'tts.style', base.tts.style),
       pythonPath: str(ttsSrc.pythonPath, 'tts.pythonPath', base.tts.pythonPath),
       cacheDir: str(ttsSrc.cacheDir, 'tts.cacheDir', base.tts.cacheDir),
     },

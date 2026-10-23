@@ -1015,15 +1015,19 @@ export function apply(ctx: any): void {
       if (rest === 'voice-preview') {
         if (method !== 'POST') return send(405, { error: 'method not allowed' });
         const payload = (JSON.parse(body || 'null') as
-          | { text?: unknown; voice?: unknown; rate?: unknown; pitch?: unknown; volume?: unknown; rvc?: unknown }
+          | { text?: unknown; voice?: unknown; rate?: unknown; pitch?: unknown; volume?: unknown; rvc?: unknown; tts?: unknown }
           | null) ?? {};
         const cfg = readQqConfig(qqConfigPath(root)).config;
+        const ttsOverride =
+          payload.tts !== null && typeof payload.tts === 'object'
+            ? (payload.tts as Partial<typeof cfg.tts>)
+            : {};
+        const tts = { ...cfg.tts, ...ttsOverride };
         const rvcOverride =
           payload.rvc !== null && typeof payload.rvc === 'object'
             ? (payload.rvc as Partial<QqRvcConfig>)
             : {};
         const rvc = { ...cfg.rvc, ...rvcOverride };
-        const tts = cfg.tts;
         const text =
           typeof payload.text === 'string' && payload.text.trim() !== ''
             ? payload.text.trim().slice(0, 120)
@@ -1033,6 +1037,9 @@ export function apply(ctx: any): void {
           rate: typeof payload.rate === 'string' && payload.rate !== '' ? payload.rate : tts.rate,
           pitch: typeof payload.pitch === 'string' && payload.pitch !== '' ? payload.pitch : tts.pitch,
           volume: typeof payload.volume === 'string' && payload.volume !== '' ? payload.volume : tts.volume,
+          provider: tts.provider,
+          endpoint: tts.endpoint,
+          style: tts.style,
         });
         if (!result.ok) return send(200, { ok: false, message: describeFailure(result) });
         let wav = encodeWave(result.pcm);
