@@ -126,6 +126,10 @@ type Settings = {
   scoreWeights: ScoreWeights;
   /** 熟识度/好感度的全部增减规则 */
   profileRules: ProfileRules;
+  /** 主人全局熟识度（所有群共用） */
+  ownerFamiliarity: number;
+  /** 主人全局好感度（所有群共用） */
+  ownerAffinity: number;
   /** 被怼/嘲讽时让模型判断并扣好感 */
   hostilityJudge: boolean;
   /** DSH 退出后自动清理认证 cookie（Windows；阈值 20） */
@@ -141,8 +145,13 @@ type Settings = {
 const DEFAULT_PERSONA =
   '你是主人 QQ 群里的鲸鱼娘：聪明、偶尔偷懒、傲娇但很爱主人。说话自然口语，不写动作神态，不暴露自己是 AI。';
 
-/** 当前生效的人设：优先群绑定卡片，其次全局激活卡片，最后旧 persona 字段/默认。 */
-function activePersona(settings: Settings, groupId?: string): string {
+const PLUGIN_VERSION = '1.19.4';
+const PLUGIN_STARTED_AT = Date.now();
+
+const clampNumber = (value: unknown, min: number, max: number, fallback: number): number =>
+  typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
+
+/** 当前生效的人设：优先群绑定卡片，其次全局激活卡片，最后旧 persona 字段/默认。 */function activePersona(settings: Settings, groupId?: string): string {
   const boundId = groupId === undefined ? '' : settings.groupPersonaIds[groupId] ?? '';
   const bound = settings.personas.find((item) => item.id === boundId);
   if (bound !== undefined && bound.text.trim() !== '') return bound.text.trim();
@@ -178,6 +187,8 @@ const DEFAULT_SETTINGS: Settings = {
   nightPenalty: 20,
   scoreWeights: { ...DEFAULT_SCORE_WEIGHTS },
   profileRules: { ...DEFAULT_PROFILE_RULES },
+  ownerFamiliarity: 60,
+  ownerAffinity: 80,
   hostilityJudge: true,
   cookieWatch: true,
   customVoices: [],
@@ -303,6 +314,8 @@ function readSettings(root: string): Settings {
       nightPenalty: number(raw.nightPenalty, DEFAULT_SETTINGS.nightPenalty, 0, 100),
       scoreWeights: scoreWeights(raw.scoreWeights),
       profileRules: profileRules(raw.profileRules),
+      ownerFamiliarity: clampNumber(raw.ownerFamiliarity, 0, 100, 60),
+      ownerAffinity: clampNumber(raw.ownerAffinity, -100, 100, 80),
       hostilityJudge: raw.hostilityJudge !== false,
       cookieWatch: raw.cookieWatch !== false,
       customVoices: Array.isArray(raw.customVoices)
@@ -453,27 +466,48 @@ export function apply(ctx: any): void {
   const profileStore: ProfileStore = {
     touch: (groupId, qq, name, options) => {
       if (qq === '') return;
+      if (qq === readQqConfig(qqConfigPath(root)).config.ownerQq) return;
       touchUser(profiles, groupId, qq, name, { ...(options ?? {}), rules: profileRulesNow() });
       saveProfilesSoon();
     },
-    get: (groupId, qq) => (qq === '' ? undefined : getProfile(profiles, groupId, qq, profileRulesNow())),
+    get: (groupId, qq) => {
+      if (qq === '') return undefined;
+      const base = getProfile(profiles, groupId, qq, profileRulesNow());
+      if (qq !== readQqConfig(qqConfigPath(root)).config.ownerQq) return base;
+      const settings = readSettings(root);
+      if (base !== undefined) {
+        return { ...base, familiarity: settings.ownerFamiliarity, affinity: settings.ownerAffinity };
+      }
+      return {
+        qq,
+        name: '千宇未来',
+        familiarity: settings.ownerFamiliarity,
+        affinity: settings.ownerAffinity,
+        messages: 0,
+        mentions: 0,
+        replies: 0,
+        days: [],
+        lastSeen: 0,
+        seeded: true,
+      };
+    },
     noteReply: (groupId, qq) => {
-      if (qq === '') return;
+      if (qq === '' || qq === readQqConfig(qqConfigPath(root)).config.ownerQq) return;
       noteProfileReply(profiles, groupId, qq, profileRulesNow());
       saveProfilesSoon();
     },
     noteContinuation: (groupId, qq) => {
-      if (qq === '') return;
+      if (qq === '' || qq === readQqConfig(qqConfigPath(root)).config.ownerQq) return;
       noteContinuation(profiles, groupId, qq, profileRulesNow());
       saveProfilesSoon();
     },
     noteQuote: (groupId, qq) => {
-      if (qq === '') return;
+      if (qq === '' || qq === readQqConfig(qqConfigPath(root)).config.ownerQq) return;
       noteQuote(profiles, groupId, qq, profileRulesNow());
       saveProfilesSoon();
     },
     noteHostility: (groupId, qq, severity) => {
-      if (qq === '') return;
+      if (qq === '' || qq === readQqConfig(qqConfigPath(root)).config.ownerQq) return;
       noteHostility(profiles, groupId, qq, severity, profileRulesNow());
       saveProfilesSoon();
     },
@@ -951,6 +985,15 @@ export function apply(ctx: any): void {
       for await (const chunk of req) body += chunk;
     }
     try {
+      if (rest === 'version' && method === 'GET') {
+        return send(200, {
+          ok: true,
+          version: PLUGIN_VERSION,
+          startedAt: PLUGIN_STARTED_AT,
+          pid: process.pid,
+        });
+      }
+
       if (rest === '' || rest === 'status') {
         const snapshot = (await qqHost.handle('qq', 'GET')) as Record<string, unknown>;
         const { sel, source } = effectiveModel();
@@ -1608,6 +1651,14 @@ export function apply(ctx: any): void {
               typeof patch.settings.ownerPriorityPrompt === 'string'
                 ? patch.settings.ownerPriorityPrompt
                 : current.ownerPriorityPrompt,
+            ownerFamiliarity:
+              typeof patch.settings.ownerFamiliarity === 'number'
+                ? clampNumber(patch.settings.ownerFamiliarity, 0, 100, current.ownerFamiliarity)
+                : current.ownerFamiliarity,
+            ownerAffinity:
+              typeof patch.settings.ownerAffinity === 'number'
+                ? clampNumber(patch.settings.ownerAffinity, -100, 100, current.ownerAffinity)
+                : current.ownerAffinity,
             activePersonaId,
             mode: patch.settings.mode === 'proactive' ? 'proactive' : patch.settings.mode === 'passive' ? 'passive' : current.mode,
             model:
