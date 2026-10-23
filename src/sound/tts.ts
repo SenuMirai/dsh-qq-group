@@ -180,7 +180,18 @@ async function synthesizeExternal(
   text: string,
   style: string,
 ): Promise<TtsResult> {
-  const url = endpoint.trim().replace(/\/+$/, '') + '/tts';
+  const base = endpoint.trim().replace(/\/+$/, '');
+  if (base === '') return { ok: false, reason: 'error', message: '本地 TTS 网关地址为空' };
+  try {
+    // 先做 2.5 秒健康检查：服务没起来时不要卡 180 秒，直接回退 Edge。
+    const health = await fetch(`${base}/health`, { signal: AbortSignal.timeout(2_500) });
+    if (!health.ok) {
+      return { ok: false, reason: 'error', message: `本地 TTS 网关未就绪（HTTP ${health.status}）` };
+    }
+  } catch {
+    return { ok: false, reason: 'error', message: `本地 TTS 网关不可用：${base}` };
+  }
+  const url = base + '/tts';
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 180_000);
@@ -251,7 +262,7 @@ export class Speaker {
     }
 
     const provider = options.provider ?? 'edge';
-    const result: TtsResult =
+    let result: TtsResult =
       provider === 'edge'
         ? await hostSynthesize(this.userRoot, trimmed, {
             voice: options.voice,
@@ -260,6 +271,16 @@ export class Speaker {
             volume: options.volume,
           })
         : await synthesizeExternal(options.endpoint ?? '', trimmed, options.style ?? '');
+    if (!result.ok && provider !== 'edge') {
+      // 本地 GPT-SoVITS/CosyVoice/Kokoro 网关没启动时，不能把整条语音吞掉。
+      console.warn(`[dsh-qq-group] 本地 TTS 失败，回退 Edge：${result.message}`);
+      result = await hostSynthesize(this.userRoot, trimmed, {
+        voice: options.voice,
+        rate: options.rate,
+        pitch: options.pitch,
+        volume: options.volume,
+      });
+    }
     if (!result.ok) return result;
     this.synthesized += 1;
 
