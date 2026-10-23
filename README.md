@@ -217,6 +217,16 @@ DSH 设置 →「QQ 群聊」→「连接」：
 
 
 
+
+
+### v1.9.3 明确语音/唱歌触发修复
+
+- 修复“你唱首歌来听听”误提取歌名“歌来听听”导致唱歌失败、退回文字；无明确歌名时使用默认曲目。
+- 修复“唱首小星星”这类没有“歌”字的点歌请求不被识别。
+- 修复“说语音给我听听”这类语音请求不被识别。
+- 明确要求语音/唱歌默认 100% 触发，可在语音页调低。
+- 修正语音发送分支准入，普通语音概率为 0 时明确要求仍可发。
+
 ### v1.9.2 RVC 试听临时目录
 
 - RVC worker 输出改到模型目录下的 temp，避开 Windows/沙箱子进程不可写的用户缓存目录。
@@ -548,6 +558,16 @@ Each project keeps its own license; this project borrows design ideas only and d
 
 
 
+
+
+
+### v1.9.3 Explicit voice/singing fixes
+
+- Fixed "sing a song for me" extracting the bogus title "歌来听听" and falling back to text; no title now uses the default song.
+- Fixed "sing Little Star" without the word "song" not being recognized.
+- Fixed "say it in a voice message" not being recognized.
+- Explicit voice/singing now defaults to 100% and remains configurable.
+- Fixed the voice-send gate so an explicit request still sends even when the normal voice chance is 0.
 
 ### v1.9.2 RVC preview temp directory
 

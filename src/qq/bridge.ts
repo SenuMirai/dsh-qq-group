@@ -1497,7 +1497,7 @@ export class QqBridge {
           plan = {
             ...plan,
             action: 'sing',
-            ...(requestedSong === undefined ? {} : { song: requestedSong }),
+            song: requestedSong,
           };
           if (Math.random() >= policy.requestedSingChance) {
             this.log('info', `群 ${groupId} 被要求唱歌，但请求唱歌概率未命中（${Math.round(policy.requestedSingChance * 100)}%），改回文字`);
@@ -1514,6 +1514,8 @@ export class QqBridge {
       }
       // 明确要图/要自拍时优先保证图；不要被语音/唱歌分支提前 return
       if ((imageSendRequest || selfieRequest) && !singRequest && plan.action !== 'text') plan = { ...plan, action: 'text' };
+      // 明确要语音时，不要被模型自作主张选成唱歌
+      if (voiceRequest && !singRequest && plan.action === 'sing') plan = { ...plan, action: 'text' };
       const selectedSelfie = selfieRequest && message !== undefined ? this.deps.selfies?.pick(message.text) : undefined;
       // 语音概率独立掷骰：不再等模型“选 voice”。
       // 被明确要求发语音时用 requestedVoiceChance；否则用普通 voiceChance。
@@ -1626,7 +1628,10 @@ export class QqBridge {
     }
 
     // 语音：把这几条连起来念（单独发一条 record，文字仍按条发）
-    if (plan.action === 'voice' && (policy.voiceChance > 0 || mode === 'proactive')) {
+    if (
+      plan.action === 'voice' &&
+      (policy.voiceChance > 0 || policy.requestedVoiceChance > 0 || mode === 'proactive')
+    ) {
       const text = plan.messages.join('，');
       const voiceOk = await this.speakInGroup(groupId, text);
       if (voiceOk) {
