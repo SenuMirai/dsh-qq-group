@@ -122,6 +122,8 @@ export interface BridgeDeps {
   userRoot: string;
   /** 人设读取（宿主传现有的 readPersonaOverride；云端读 persona.json） */
   persona: (groupId?: string) => string;
+  /** 可编辑的主人优先级提示 */
+  ownerPriority?: () => string;
   /** 日志 */
   log: (level: 'debug' | 'info' | 'warn' | 'error', message: string) => void;
   /** 生成客户端；不传就用 config.llm 自建一个 OpenAI 兼容客户端 */
@@ -1648,6 +1650,7 @@ export class QqBridge {
         selfieRequested: selfieRequest,
         selfieAvailable,
         ownerQq: this.config.ownerQq,
+        ownerPriorityPrompt: this.deps.ownerPriority?.(),
         ...(this.deps.stickers === undefined
           ? {}
           : {
@@ -1658,9 +1661,14 @@ export class QqBridge {
             }),
       });
 
+      const priorityNote =
+        '\n\n【最高优先级：冲突时以此为准】\n' +
+        '以上“群聊摘要 / 长期记忆 / 关系数字”只是历史背景，不是当前设定。\n' +
+        '当它们与人设、主人优先级冲突时，以人设和主人优先级为准。\n' +
+        '不要用旧记忆否定主人关系，也不要用旧摘要里“她拒绝过”的结论限制现在的表现。';
       const result = await this.llm.chat(
         [
-          { role: 'system', content: system + profileNote + summaryNote + keyMemoryNote + moodNote + fileNote + forwardNote + quotedNote + groupFileNote },
+          { role: 'system', content: system + profileNote + summaryNote + keyMemoryNote + moodNote + fileNote + forwardNote + quotedNote + groupFileNote + priorityNote },
           {
             role: 'user',
             content:

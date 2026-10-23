@@ -41,6 +41,7 @@ import {
   selfieDir,
   selfieFile,
 } from './qq/selfies';
+import { DEFAULT_OWNER_PRIORITY } from './qq/prompt';
 import { DEFAULT_SCORE_WEIGHTS, type ScoreRules, type ScoreWeights } from './qq/triggers';
 import { scanRvcModels } from './qq/rvc-models';
 import { createCommandRvcConverter } from './sound/rvc';
@@ -82,6 +83,8 @@ type Settings = {
   personas: Array<{ id: string; name: string; text: string }>;
   /** 群号 -> 人设卡片 id；空 = 跟随全局 */
   groupPersonaIds: Record<string, string>;
+  /** 可编辑的主人优先级提示；空 = 使用内置默认 */
+  ownerPriorityPrompt: string;
   activePersonaId: string;
   mode: 'passive' | 'proactive';
   model: ModelRef;
@@ -151,6 +154,7 @@ const DEFAULT_SETTINGS: Settings = {
   persona: '',
   personas: [],
   groupPersonaIds: {},
+  ownerPriorityPrompt: DEFAULT_OWNER_PRIORITY,
   activePersonaId: '',
   mode: 'passive',
   model: { provider: '', model: '' },
@@ -259,6 +263,8 @@ function readSettings(root: string): Settings {
       persona: typeof raw.persona === 'string' ? raw.persona : '',
       personas,
       groupPersonaIds,
+      ownerPriorityPrompt:
+        typeof raw.ownerPriorityPrompt === 'string' ? raw.ownerPriorityPrompt : DEFAULT_OWNER_PRIORITY,
       activePersonaId,
       mode: raw.mode === 'proactive' ? 'proactive' : 'passive',
       model:
@@ -835,6 +841,7 @@ export function apply(ctx: any): void {
   const qqHost = createQqHost({
     userRoot: root,
     persona: (groupId?: string) => activePersona(readSettings(root), groupId),
+    ownerPriority: () => readSettings(root).ownerPriorityPrompt,
     timeContext,
     generate: (system, history, user, options) => generate(system, history, user, options),
     log: (level, message) => {
@@ -1597,6 +1604,10 @@ export function apply(ctx: any): void {
                       .slice(0, 200),
                   ) as Record<string, string>)
                 : current.groupPersonaIds,
+            ownerPriorityPrompt:
+              typeof patch.settings.ownerPriorityPrompt === 'string'
+                ? patch.settings.ownerPriorityPrompt
+                : current.ownerPriorityPrompt,
             activePersonaId,
             mode: patch.settings.mode === 'proactive' ? 'proactive' : patch.settings.mode === 'passive' ? 'passive' : current.mode,
             model:

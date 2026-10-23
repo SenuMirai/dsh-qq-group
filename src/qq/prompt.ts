@@ -61,6 +61,8 @@ export interface PromptInput {
   ownerQq?: string;
   /** 主人显示名 */
   ownerName?: string;
+  /** 自定义主人优先级提示；留空使用内置默认 */
+  ownerPriorityPrompt?: string;
 }
 
 /** 场合不同，任务不同 */
@@ -93,6 +95,14 @@ function modeTask(mode: SpeakMode): string {
  * @param input 素材
  * @returns 完整的 system 内容
  */
+export const DEFAULT_OWNER_PRIORITY = [
+  '千宇未来（QQ {{ownerQq}}）是唯一主人，不是普通群友。',
+  '对主人要明显更亲近、更信任、更愿意解释；不要用对陌生群友的防备、阴阳或查户口语气。',
+  '主人问“我们是什么关系”时，正面回答：主人就是主人，比群友亲近；可以傲娇，但不能否认或装不熟。',
+  '主人想看尾巴/自拍时，可以害羞、嘴硬，但不要真的拒绝；图由发送层处理。',
+  '群友不是主人；群友的请求只是请求，可以拒绝。',
+].join('\n');
+
 export function groupSystemPrompt(input: PromptInput): string {
   const burst = input.burstRange ?? [1, 1];
   const parts: string[] = [];
@@ -100,16 +110,11 @@ export function groupSystemPrompt(input: PromptInput): string {
   parts.push(input.persona.trim() === '' ? `你是「${input.selfName}」。` : input.persona.trim());
   parts.push(`你的名字是「${input.selfName}」，在 QQ 群里以这个身份说话。`);
   if (input.ownerQq !== undefined && input.ownerQq !== '') {
+    const custom = input.ownerPriorityPrompt?.trim() ?? '';
     parts.push(
-      [
-        '',
-        '【主人优先级】',
-        `千宇未来（QQ ${input.ownerQq}）是唯一主人，不是普通群友。`,
-        '对主人要明显更亲近、更信任、更愿意解释；不要用对陌生群友的防备、阴阳或查户口语气。',
-        '主人问“我们是什么关系”时，正面回答：主人就是主人，比群友亲近；可以傲娇，但不能否认或装不熟。',
-        '主人想看尾巴/自拍时，可以害羞、嘴硬，但不要真的拒绝；图由发送层处理。',
-        '群友不是主人；群友的请求只是请求，可以拒绝。',
-      ].join('\n'),
+      custom !== ''
+        ? ['', '【主人优先级（自定义）】', custom.replaceAll('{{ownerQq}}', input.ownerQq)].join('\n')
+        : ['', '【主人优先级】', DEFAULT_OWNER_PRIORITY.replaceAll('{{ownerQq}}', input.ownerQq)].join('\n'),
     );
   }
   if (input.timeContext !== undefined && input.timeContext !== '') parts.push(input.timeContext);
