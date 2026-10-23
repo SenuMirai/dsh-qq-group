@@ -1893,21 +1893,20 @@ export class QqBridge {
         this.log('warn', '对方要求发表情包，但仓库里没有可用的图');
       }
     }
-    // 鲸鱼娘自拍照：明确要自拍/看尾巴时按独立概率发；没有素材就安静地只发文字
+    // 鲸鱼娘自拍照：明确要自拍/看尾巴时直接发；这是明确请求，不再掷概率。
     if (selfieRequested && policy.selfieEnabled && selfie !== undefined) {
-      const selfieChance = policy.selfieChance;
-      if (selfieChance > 0 && Math.random() < selfieChance) {
-        const file = this.deps.selfies?.resolve(selfie.file);
-        if (file !== undefined) {
-          const imageSent = await this.sendSegments(groupId, [{ type: 'image', data: { file } }]);
-          if (imageSent.ok) {
-            sent += 1;
-            this.deps.selfies?.markUsed?.(selfie.file);
-            this.appendAssistant(groupId, '（发了张鲸鱼娘自拍）', Date.now());
-          } else {
-            this.log('warn', `自拍发送失败（${imageSent.reason}）：${imageSent.message}`);
-          }
+      const file = this.deps.selfies?.resolve(selfie.file);
+      if (file !== undefined) {
+        const imageSent = await this.sendSegments(groupId, [{ type: 'image', data: { file } }]);
+        if (imageSent.ok) {
+          sent += 1;
+          this.deps.selfies?.markUsed?.(selfie.file);
+          this.appendAssistant(groupId, '（发了张鲸鱼娘自拍）', Date.now());
+        } else {
+          this.log('warn', `自拍发送失败（${imageSent.reason}）：${imageSent.message}`);
         }
+      } else {
+        this.log('warn', `自拍素材文件不存在：${selfie.file}`);
       }
     }
     return sent;
