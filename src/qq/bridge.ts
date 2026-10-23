@@ -1647,6 +1647,7 @@ export class QqBridge {
         imageRequested: imageSendRequest,
         selfieRequested: selfieRequest,
         selfieAvailable,
+        ownerQq: this.config.ownerQq,
         ...(this.deps.stickers === undefined
           ? {}
           : {

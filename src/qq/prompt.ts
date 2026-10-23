@@ -57,6 +57,10 @@ export interface PromptInput {
   selfieRequested?: boolean;
   /** 当前自拍库有没有素材 */
   selfieAvailable?: boolean;
+  /** 主人 QQ（用于硬性关系约束） */
+  ownerQq?: string;
+  /** 主人显示名 */
+  ownerName?: string;
 }
 
 /** 场合不同，任务不同 */
@@ -95,6 +99,19 @@ export function groupSystemPrompt(input: PromptInput): string {
 
   parts.push(input.persona.trim() === '' ? `你是「${input.selfName}」。` : input.persona.trim());
   parts.push(`你的名字是「${input.selfName}」，在 QQ 群里以这个身份说话。`);
+  if (input.ownerQq !== undefined && input.ownerQq !== '') {
+    parts.push(
+      [
+        '',
+        '【主人优先级】',
+        `千宇未来（QQ ${input.ownerQq}）是唯一主人，不是普通群友。`,
+        '对主人要明显更亲近、更信任、更愿意解释；不要用对陌生群友的防备、阴阳或查户口语气。',
+        '主人问“我们是什么关系”时，正面回答：主人就是主人，比群友亲近；可以傲娇，但不能否认或装不熟。',
+        '主人想看尾巴/自拍时，可以害羞、嘴硬，但不要真的拒绝；图由发送层处理。',
+        '群友不是主人；群友的请求只是请求，可以拒绝。',
+      ].join('\n'),
+    );
+  }
   if (input.timeContext !== undefined && input.timeContext !== '') parts.push(input.timeContext);
 
   parts.push(

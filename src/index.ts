@@ -1517,6 +1517,21 @@ export function apply(ctx: any): void {
             }
           | null;
         const groupId = typeof payload?.groupId === 'string' ? payload.groupId : urlGroup;
+        if (payload?.action === 'summary') {
+          const text = typeof payload.text === 'string' ? payload.text.slice(0, 20_000) : '';
+          try {
+            const memoryPath = join(root, 'qq-memory.json');
+            const memory = JSON.parse(readFileSync(memoryPath, 'utf8')) as {
+              groups?: Record<string, { summary?: string }>;
+            };
+            memory.groups = memory.groups ?? {};
+            memory.groups[groupId] = { ...(memory.groups[groupId] ?? {}), summary: text };
+            writeFileSync(memoryPath, `${JSON.stringify(memory, null, 2)}\n`, 'utf8');
+            return send(200, { ok: true });
+          } catch (e) {
+            return send(200, { ok: false, message: e instanceof Error ? e.message : String(e) });
+          }
+        }
         if (payload?.action === 'set') {
           return send(200, await qqHost.memory('set', groupId, payload.keyMemories));
         }
