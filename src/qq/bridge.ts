@@ -531,43 +531,7 @@ export class QqBridge {
       },
       ...(this.config.tts.pythonPath === '' ? {} : { ffmpeg: undefined }),
     });
-    if (this.config.rvc.enabled) {
-      const modelPath = this.config.rvc.modelPath || this.config.sing.rvcModel;
-      const onnxModel = modelPath.toLowerCase().endsWith('.onnx');
-      const wantGpu =
-        this.config.rvc.device === 'auto' ||
-        this.config.rvc.device === 'dml' ||
-        this.config.rvc.device === 'cuda';
-      const useOnnx = wantGpu && onnxModel;
-      const baseDir = this.config.rvc.modelsDir || dirname(modelPath);
-      const pythonPath = useOnnx
-        ? this.config.rvc.onnxPythonPath || join(baseDir, 'venv-onnx', 'Scripts', 'python.exe')
-        : this.config.rvc.pythonPath;
-      const scriptPath = useOnnx
-        ? this.config.rvc.onnxScriptPath || join(baseDir, 'rvc_onnx_worker.py')
-        : this.config.rvc.scriptPath;
-      this.rvcConverter =
-        scriptPath.trim() !== '' && modelPath.trim() !== ''
-          ? createCommandRvcConverter({
-              pythonPath,
-              scriptPath,
-              modelPath,
-              indexPath: this.config.rvc.indexPath,
-              device: useOnnx ? 'dml' : 'cpu',
-              pitch: this.config.rvc.pitch,
-              indexRate: this.config.rvc.indexRate,
-              protect: this.config.rvc.protect,
-              filterRadius: this.config.rvc.filterRadius,
-              rmsMixRate: this.config.rvc.rmsMixRate,
-              f0Method: this.config.rvc.f0Method,
-              timeoutMs: this.config.rvc.timeoutMs,
-              maxSeconds: this.config.rvc.maxSeconds,
-              tempDir: join(this.config.rvc.modelsDir || dirname(modelPath), 'temp'),
-            })
-          : undefined;
-    } else {
-      this.rvcConverter = undefined;
-    }
+    this.configureRvc();
 
     this.client = new OneBotClient({
       url: this.config.url,
@@ -624,8 +588,50 @@ export class QqBridge {
    * 配置保存后立即生效：替换配置并重排冷场主动开口（不用重启插件）。
    * 之前保存只落盘，运行中的桥还拿着旧配置，改了「冷场多久」也不会马上变。
    */
+  /** 按当前配置重建 RVC 转换器；保存设置后立即生效。 */
+  private configureRvc(): void {
+    if (!this.config.rvc.enabled) {
+      this.rvcConverter = undefined;
+      return;
+    }
+    const modelPath = this.config.rvc.modelPath || this.config.sing.rvcModel;
+    const onnxModel = modelPath.toLowerCase().endsWith('.onnx');
+    const wantGpu =
+      this.config.rvc.device === 'auto' ||
+      this.config.rvc.device === 'dml' ||
+      this.config.rvc.device === 'cuda';
+    const useOnnx = wantGpu && onnxModel;
+    const baseDir = this.config.rvc.modelsDir || dirname(modelPath);
+    const pythonPath = useOnnx
+      ? this.config.rvc.onnxPythonPath || join(baseDir, 'venv-onnx', 'Scripts', 'python.exe')
+      : this.config.rvc.pythonPath;
+    const scriptPath = useOnnx
+      ? this.config.rvc.onnxScriptPath || join(baseDir, 'rvc_onnx_worker.py')
+      : this.config.rvc.scriptPath;
+    this.rvcConverter =
+      scriptPath.trim() !== '' && modelPath.trim() !== ''
+        ? createCommandRvcConverter({
+            pythonPath,
+            scriptPath,
+            modelPath,
+            indexPath: this.config.rvc.indexPath,
+            device: useOnnx ? 'dml' : 'cpu',
+            pitch: this.config.rvc.pitch,
+            indexRate: this.config.rvc.indexRate,
+            protect: this.config.rvc.protect,
+            filterRadius: this.config.rvc.filterRadius,
+            rmsMixRate: this.config.rvc.rmsMixRate,
+            f0Method: this.config.rvc.f0Method,
+            timeoutMs: this.config.rvc.timeoutMs,
+            maxSeconds: this.config.rvc.maxSeconds,
+            tempDir: join(this.config.rvc.modelsDir || dirname(modelPath), 'temp'),
+          })
+        : undefined;
+  }
+
   applyConfig(config: QqConfig): void {
     this.config = config;
+    this.configureRvc();
     const now = Date.now();
     for (const state of this.states.values()) {
       const policy = config.groups[state.groupId] ?? config.defaultGroup;
@@ -2499,7 +2505,14 @@ export function clampMessages(messages: string[], policy: GroupPolicy): string[]
   return messages
     .slice(0, Math.max(1, policy.burst.max))
     .map((text) => (text.length > 300 ? `${text.slice(0, 300)}…` : text))
-    .filter((text) => text.trim() !== '');
+    .filter((text) => text.trim() !== '')
+    .filter((text) => {
+      const value = text.trim();
+      if (/^[{}[\],]+$/.test(value)) return false;
+      if (/^"(?:messages|action|song|sticker|thought)"\s*:/.test(value)) return false;
+      if (/"messages"\s*:/.test(value) || /"action"\s*:/.test(value)) return false;
+      return true;
+    });
 }
 
 /** 去抖窗口时长（导出给测试与文档用） */

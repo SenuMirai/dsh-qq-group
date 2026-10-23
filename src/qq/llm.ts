@@ -234,12 +234,56 @@ export function parseReplyPlan(raw: string): ReplyPlan {
       // 落到下面的按行切分
     }
   }
+  const salvaged = salvagePlan(cleaned);
+  if (salvaged !== undefined) return salvaged;
   const lines = cleaned
     .split(/\r?\n+/)
     .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.、)])\s*/, '').trim())
-    .filter((line) => line !== '' && !/^```/.test(line));
+    .filter((line) => {
+      if (line === '' || /^```/.test(line)) return false;
+      // 模型输出被截断时会退化成 JSON 片段；不要把片段当正文发出去。
+      if (/^[{}[\],\s]*$/.test(line)) return false;
+      if (/^"(?:messages|action|song|sticker|thought)"\s*:/.test(line)) return false;
+      if (/"messages"\s*:/.test(line) || /"action"\s*:/.test(line)) return false;
+      return true;
+    })
+    .map((line) => line.replace(/^[`"'\s]+|[`"'\s]+$/g, '').trim())
+    .filter((line) => line !== '' && !/^[{}[\],]+$/.test(line));
   const thought = extractJsonString(cleaned, 'thought');
   return { messages: lines, action: 'text', ...(thought === undefined ? {} : { thought }) };
+}
+
+/** 从被截断/半损坏的 JSON 里抢救 messages 数组和 action。 */
+function salvagePlan(text: string): ReplyPlan | undefined {
+  const key = text.indexOf('"messages"');
+  if (key < 0) return undefined;
+  const start = text.indexOf('[', key);
+  if (start < 0) return undefined;
+  const tail = text.slice(start + 1);
+  const end = tail.search(/"action"\s*:|"song"\s*:|"sticker"\s*:|"thought"\s*:/);
+  const region = end >= 0 ? tail.slice(0, end) : tail;
+  const messages: string[] = [];
+  const re = /"((?:\\.|[^"\\])*)"/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(region)) !== null) {
+    try {
+      const value = JSON.parse(`"${match[1]}"`) as string;
+      if (value.trim() !== '') messages.push(value.trim());
+    } catch {
+      // 跳过坏转义
+    }
+  }
+  if (messages.length === 0) return undefined;
+  const actionMatch = /"action"\s*:\s*"(text|voice|sing)"/.exec(text);
+  const action = actionMatch?.[1] === 'voice' || actionMatch?.[1] === 'sing' ? actionMatch[1] : 'text';
+  const songMatch = /"song"\s*:\s*"((?:\\.|[^"\\])*)"/.exec(text);
+  const thought = extractJsonString(text, 'thought');
+  return {
+    messages,
+    action,
+    ...(songMatch === null ? {} : { song: songMatch[1] }),
+    ...(thought === undefined ? {} : { thought }),
+  };
 }
 
 /** 从半损坏的 JSON 文本里抢救一个字符串字段（避免日记因 thought 丢失） */

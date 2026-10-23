@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 1.11.1 — 截断 JSON 防漏字 + RVC 保存即时生效
+
+- 修复模型输出被截断时，把 `{`、`"messages": [...]`、`"action": "text"` 当成聊天文字发到群里的问题。
+- 新增半损坏 JSON 抢救：从截断内容里提取 messages/action/song，不再发送 JSON 片段。
+- 保存设置后立即重建 RVC 转换器，RVC 音调/检索/保护等参数不再需要重启才生效。
+- 语音页提示：选择 CosyVoice/Kokoro 后，Edge 音色/语速不参与本地合成。
+
 ## 1.11.0 — Kokoro 核显 TTS
 
 - 新增 Kokoro-82M 本地 TTS 后端，ONNX Runtime **DirectML**，适配 780M 核显。
