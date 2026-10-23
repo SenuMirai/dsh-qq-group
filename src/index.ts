@@ -13,7 +13,7 @@
 
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { homedir } from 'node:os';
 import { basename, dirname, extname, join } from 'node:path';
@@ -883,6 +883,11 @@ export function apply(ctx: any): void {
       if (level === 'error') console.error(line);
       else if (level === 'warn') console.warn(line);
       else console.log(line);
+      try {
+        appendFileSync(join(root, 'qq-debug.log'), `${new Date().toISOString()} [${level}] ${message}\n`, 'utf8');
+      } catch {
+        /* 日志失败不影响运行 */
+      }
     },
     stickers: createStickerHub(root, {
       saveEnabled: () => readSettings(root).stickerSave,

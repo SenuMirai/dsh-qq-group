@@ -265,6 +265,8 @@ export class QqBridge {
   private readonly pendingDirect = new Map<string, GroupMessage[]>();
   /** 这一波闲聊攒下的文本（去抖窗口内）：关键词和上下文判定用 */
   private readonly pendingTexts = new Map<string, string[]>();
+  /** 这一波最后一条消息：普通闲聊回复也要带上，否则自拍/发图/引用都识别不到 */
+  private readonly pendingMessage = new Map<string, GroupMessage>();
   /** 这一波最后说话的人：成员概率用 */
   private readonly lastSpeaker = new Map<string, string>();
   /** 每个群最近一条入站消息 id：用于判断回复目标是否已被后续消息隔开 */
@@ -916,6 +918,7 @@ export class QqBridge {
     if (trigger === 'at' || trigger === 'call' || repliedToSelf || imageRequest || imageSendRequest || selfieRequest || voiceRequest || singRequest || quotedRequest || groupFileRequest) {
       clearChatWindow(state);
       this.pendingTexts.delete(groupId);
+      this.pendingMessage.delete(groupId);
       this.pendingAtOther.delete(groupId);
       this.pendingReplyOther.delete(groupId);
       // 被直接对话 → 进入「兴奋期」：这一段时间里更愿意接闲聊；
@@ -945,6 +948,7 @@ export class QqBridge {
       texts.push(message.text.slice(0, 500));
       if (texts.length > 10) texts.shift();
       this.pendingTexts.set(groupId, texts);
+      this.pendingMessage.set(groupId, message);
     }
     if ((message.atOthers?.length ?? 0) > 0) this.pendingAtOther.set(groupId, true);
     if (
@@ -2198,6 +2202,8 @@ export class QqBridge {
         clearChatWindow(state);
         const texts = this.pendingTexts.get(groupId) ?? [];
         this.pendingTexts.delete(groupId);
+        const pending = this.pendingMessage.get(groupId);
+        this.pendingMessage.delete(groupId);
         const atOther = this.pendingAtOther.get(groupId) === true;
         this.pendingAtOther.delete(groupId);
         const replyOther = this.pendingReplyOther.get(groupId) === true;
@@ -2229,12 +2235,12 @@ export class QqBridge {
           if (gate) {
             void (async () => {
               const ok = await this.gateSpeak(groupId, policy, texts, decision, atOther, replyOther, Date.now());
-              if (ok) await this.replyTo(groupId, policy, undefined, 'chat', Date.now());
+              if (ok) await this.replyTo(groupId, policy, pending, 'chat', Date.now());
             })().catch((e) => {
               this.recordError(`闸门/回复异常：${e instanceof Error ? e.message : String(e)}`);
             });
           } else {
-            void this.replyTo(groupId, policy, undefined, 'chat', now).catch((e) => {
+            void this.replyTo(groupId, policy, pending, 'chat', now).catch((e) => {
               this.recordError(`回复异常：${e instanceof Error ? e.message : String(e)}`);
             });
           }
