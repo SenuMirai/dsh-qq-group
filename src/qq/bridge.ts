@@ -1771,12 +1771,32 @@ export class QqBridge {
         message !== undefined &&
         this.lastInboundId.get(groupId) !== message.messageId &&
         message.text.trim() !== '' &&
+        message.replyToId === undefined &&
         (message.files?.length ?? 0) === 0 &&
         (message.forwards?.length ?? 0) === 0 &&
         message.hasVoice !== true
           ? message.messageId
           : undefined;
-      const sentCount = await this.deliver(groupId, policy, plan, now, mode, imageSendRequest, selfieRequest, selectedSelfie, quoteTarget);
+      let sentCount = await this.deliver(groupId, policy, plan, now, mode, imageSendRequest, selfieRequest, selectedSelfie, quoteTarget);
+      if (selfieRequest && selectedSelfie !== undefined) {
+        const file = this.deps.selfies?.resolve(selectedSelfie.file);
+        if (file !== undefined) {
+          const imageSegments = [
+            ...(quoteTarget === undefined ? [] : [{ type: 'reply', data: { id: quoteTarget } }]),
+            { type: 'image', data: { file } },
+          ];
+          const imageSent = await this.sendSegments(groupId, imageSegments);
+          if (imageSent.ok) {
+            sentCount += 1;
+            this.deps.selfies?.markUsed?.(selectedSelfie.file);
+            this.appendAssistant(groupId, '（发了张鲸鱼娘自拍）', Date.now());
+          } else {
+            this.log('warn', `自拍发送失败（${imageSent.reason}）：${imageSent.message}`);
+          }
+        } else {
+          this.log('warn', `自拍素材文件不存在：${selectedSelfie.file}`);
+        }
+      }
       if (sentCount > 0) {
         const stat = this.statOf(groupId);
         stat.replied += sentCount;
@@ -1897,22 +1917,7 @@ export class QqBridge {
         this.log('warn', '对方要求发表情包，但仓库里没有可用的图');
       }
     }
-    // 鲸鱼娘自拍照：明确要自拍/看尾巴时直接发；这是明确请求，不再掷概率。
-    if (selfieRequested && policy.selfieEnabled && selfie !== undefined) {
-      const file = this.deps.selfies?.resolve(selfie.file);
-      if (file !== undefined) {
-        const imageSent = await this.sendSegments(groupId, [{ type: 'image', data: { file } }]);
-        if (imageSent.ok) {
-          sent += 1;
-          this.deps.selfies?.markUsed?.(selfie.file);
-          this.appendAssistant(groupId, '（发了张鲸鱼娘自拍）', Date.now());
-        } else {
-          this.log('warn', `自拍发送失败（${imageSent.reason}）：${imageSent.message}`);
-        }
-      } else {
-        this.log('warn', `自拍素材文件不存在：${selfie.file}`);
-      }
-    }
+    // 自拍在 replyTo 里单独发送：明确请求不依赖模型文本，避免模型拒绝就吞图。
     return sent;
   }
 
