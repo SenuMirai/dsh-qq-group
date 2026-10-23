@@ -215,6 +215,14 @@ DSH 设置 →「QQ 群聊」→「连接」：
 
 
 
+
+
+### v1.9.2 RVC 试听临时目录
+
+- RVC worker 输出改到模型目录下的 temp，避开 Windows/沙箱子进程不可写的用户缓存目录。
+- worker 把 TEMP/TMP/TMPDIR 指向自己的可写目录，修复 ONNX 运行时报无可用临时目录。
+- 试听失败会显示具体错误。
+
 ### v1.9.1 试听与明确语音/唱歌
 
 - 试听按钮会应用当前 RVC 设置（包括未保存的模型/设备/音调）；失败时播放原音并提示。
@@ -538,6 +546,14 @@ Each project keeps its own license; this project borrows design ideas only and d
 
 
 
+
+
+
+### v1.9.2 RVC preview temp directory
+
+- RVC worker output now goes to a temp directory under the model directory, avoiding unwritable user-cache paths in Windows/sandboxed child processes.
+- Workers point TEMP/TMP/TMPDIR at their own writable directory, fixing ONNX no-usable-temp errors.
+- Preview failures now report the concrete error.
 
 ### v1.9.1 Preview and explicit voice/singing
 

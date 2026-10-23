@@ -1055,7 +1055,7 @@ export function apply(ctx: any): void {
             pitch: rvc.pitch,
             timeoutMs: rvc.timeoutMs,
             maxSeconds: rvc.maxSeconds,
-            tempDir: join(root, 'cache', 'rvc'),
+            tempDir: join(rvc.modelsDir || dirname(modelPath), 'temp'),
           });
           const converted = await converter.convert(wav);
           if (converted.ok) wav = converted.wav;

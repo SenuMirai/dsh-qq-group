@@ -557,7 +557,7 @@ export class QqBridge {
               pitch: this.config.rvc.pitch,
               timeoutMs: this.config.rvc.timeoutMs,
               maxSeconds: this.config.rvc.maxSeconds,
-              tempDir: join(this.deps.userRoot, 'cache', 'rvc'),
+              tempDir: join(this.config.rvc.modelsDir || dirname(modelPath), 'temp'),
             })
           : undefined;
     } else {

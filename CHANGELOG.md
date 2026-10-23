@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 1.9.2 — RVC 试听临时目录修复
+
+- 修复 RVC 试听仍播放 TTS 的问题：插件不再把 worker 输出写到用户数据目录下的临时目录（部分 Windows/沙箱环境子进程不可写），改为模型目录下的 `temp`。
+- ONNX/CPU worker 启动时把 `TEMP/TMP/TMPDIR` 指向自己的可写目录，避免 `tts-with-rvc-onnx` 报“No usable temporary directory”。
+- 试听失败时会返回并显示具体 worker 错误，不再静默回退。
+
 ## 1.9.1 — 试听走 RVC + 明确语音/唱歌触发
 
 - 试听按钮现在会读取当前（包括未保存）的 RVC 设置并应用变声；失败时播放原音并提示原因。
