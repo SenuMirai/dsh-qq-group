@@ -1353,11 +1353,21 @@ export class QqBridge {
       try {
         const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
         if (!res.ok) continue;
-        const type = (res.headers.get('content-type') ?? '').split(';')[0]?.trim() ?? '';
-        if (!/^image\//i.test(type)) continue;
+        const declaredType = (res.headers.get('content-type') ?? '').split(';')[0]?.trim() ?? '';
         const bytes = new Uint8Array(await res.arrayBuffer());
         if (bytes.byteLength === 0 || bytes.byteLength > 4 * 1024 * 1024) continue;
-        images.push({ data: bytes, mediaType: type, name: `qq-image-${Date.now()}.${type.split('/')[1] ?? 'jpg'}` });
+        const isJpeg = bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+        const isPng = bytes.length >= 4 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+        const isGif = bytes.length >= 3 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46;
+        const isWebp =
+          bytes.length >= 12 &&
+          bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+          bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50;
+        const mediaType = /^image\//i.test(declaredType)
+          ? declaredType
+          : isPng ? 'image/png' : isGif ? 'image/gif' : isWebp ? 'image/webp' : isJpeg ? 'image/jpeg' : '';
+        if (mediaType === '') continue;
+        images.push({ data: bytes, mediaType, name: `qq-image-${Date.now()}.${mediaType.split('/')[1] ?? 'jpg'}` });
       } catch (e) {
         this.log('debug', `下载聊天图片失败：${e instanceof Error ? e.message : String(e)}`);
       }
