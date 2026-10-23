@@ -2,7 +2,8 @@
  * 群文件读取：下载后的字节 → 可放入上下文的文本。
  * 支持 txt/md/json/csv/代码/pdf/docx/xlsx；解析失败会抛出可读错误。
  */
-import { strFromU8, unzipSync } from 'fflate';
+import { unzipSync } from 'fflate';
+import { TextDecoder } from 'node:util';
 import * as XLSX from 'xlsx';
 
 export type FileKind = 'text' | 'pdf' | 'docx' | 'xlsx';
@@ -89,7 +90,37 @@ function extensionOf(name: string): string {
 }
 
 function decodeText(bytes: Uint8Array): string {
-  const text = strFromU8(bytes);
+  // BOM 优先
+  if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    return new TextDecoder('utf-8').decode(bytes.subarray(3)).replace(/\r\n?/g, '\n');
+  }
+  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
+    return new TextDecoder('utf-16le').decode(bytes.subarray(2)).replace(/\r\n?/g, '\n');
+  }
+  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
+    return new TextDecoder('utf-16be').decode(bytes.subarray(2)).replace(/\r\n?/g, '\n');
+  }
+
+  // 先按严格 UTF-8；失败再按 GB18030（中文 Windows 的 txt/csv 常见）。
+  let text = '';
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    try {
+      text = new TextDecoder('gb18030').decode(bytes);
+    } catch {
+      text = new TextDecoder('utf-8').decode(bytes);
+    }
+  }
+  // UTF-8 解码成功但出现大量替换符/控制符，通常是 GBK 被误读。
+  const bad = (text.match(/\uFFFD/g) ?? []).length;
+  if (bad > 0 && bad > text.length / 100) {
+    try {
+      text = new TextDecoder('gb18030').decode(bytes);
+    } catch {
+      /* 保留 UTF-8 结果 */
+    }
+  }
   // 含大量 NUL 的通常是二进制；不要让模型读乱码
   const nul = text.slice(0, 4096).split('\u0000').length - 1;
   if (nul > 4) throw new Error('这个文件看起来是二进制格式，暂不支持');
