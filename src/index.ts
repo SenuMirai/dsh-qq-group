@@ -416,7 +416,7 @@ export function apply(ctx: any): void {
 
   // Cookie 清理不放在插件进程里：Chromium 运行期间独占锁住 Cookie 库，
   // 而且插件本身随 host 一起退出，清理必须由独立的系统级看门狗完成。
-  // 生产环境请由独立脚本/计划任务做系统级清理；插件本身不负责。
+  // 见 C:\DSHwork\dsh-cookie-watch-loop.ps1（启动文件夹常驻，DSH 退出后按阈值清理）。
 
   let previewSpeaker: Speaker | undefined;
   const getPreviewSpeaker = (): Speaker => {
@@ -995,6 +995,25 @@ export function apply(ctx: any): void {
         } catch (e) {
           return send(200, { ok: false, message: e instanceof Error ? e.message : String(e) });
         }
+      }
+
+      if (rest === 'persona/effective' && method === 'GET') {
+        const groupId = url.searchParams.get('groupId') ?? '';
+        const settings = readSettings(root);
+        const boundId = groupId === '' ? '' : settings.groupPersonaIds[groupId] ?? '';
+        const bound = settings.personas.find((item) => item.id === boundId);
+        const active = settings.personas.find((item) => item.id === settings.activePersonaId);
+        const card = bound ?? active;
+        return send(200, {
+          ok: true,
+          groupId,
+          boundId,
+          activeId: settings.activePersonaId,
+          cardId: card?.id ?? '',
+          name: card?.name ?? '',
+          length: card?.text.length ?? 0,
+          source: bound !== undefined ? 'group' : 'global',
+        });
       }
 
       if (rest === 'usage' && method === 'GET') {
