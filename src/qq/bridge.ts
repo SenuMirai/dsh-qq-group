@@ -265,6 +265,8 @@ export class QqBridge {
   private readonly pendingTexts = new Map<string, string[]>();
   /** 这一波最后说话的人：成员概率用 */
   private readonly lastSpeaker = new Map<string, string>();
+  /** 每个群最近一条入站消息 id：用于判断回复目标是否已被后续消息隔开 */
+  private readonly lastInboundId = new Map<string, string>();
   /** 她最近发出去的消息 id：引用回复这些 id = 在回过她 */
   private readonly selfMessageIds = new Map<string, Set<string>>();
   /** 这一波有没有 @ 别人（判断是不是在跟别人说话） */
@@ -842,6 +844,7 @@ export class QqBridge {
     const stat = this.statOf(groupId);
     stat.received += 1;
     stat.lastMessageAt = now;
+    this.lastInboundId.set(groupId, message.messageId);
     this.lastSpeaker.set(groupId, userId);
 
     if (message.text.trim() !== '') {
@@ -1759,7 +1762,13 @@ export class QqBridge {
         });
       }
 
-      const sentCount = await this.deliver(groupId, policy, plan, now, mode, imageSendRequest, selfieRequest, selectedSelfie);
+      const quoteTarget =
+        policy.quoteWhenSeparated &&
+        message !== undefined &&
+        this.lastInboundId.get(groupId) !== message.messageId
+          ? message.messageId
+          : undefined;
+      const sentCount = await this.deliver(groupId, policy, plan, now, mode, imageSendRequest, selfieRequest, selectedSelfie, quoteTarget);
       if (sentCount > 0) {
         const stat = this.statOf(groupId);
         stat.replied += sentCount;
@@ -1804,10 +1813,12 @@ export class QqBridge {
     imageRequested = false,
     selfieRequested = false,
     selfie?: SelfieInfo,
+    quoteTo?: string,
   ): Promise<number> {
+    const quoteSegment = quoteTo === undefined ? [] : [{ type: 'reply', data: { id: quoteTo } }];
     // 唱歌优先级最高：整段是一条语音，不用连发
     if (plan.action === 'sing' && policy.singOnRequest) {
-      const sung = await this.singInGroup(groupId, plan.song);
+      const sung = await this.singInGroup(groupId, plan.song, quoteTo);
       if (sung.ok) {
         this.appendAssistant(groupId, `（唱了一首：${plan.song ?? '即兴'}）`, now);
         return 1;
@@ -1821,7 +1832,7 @@ export class QqBridge {
       (policy.voiceChance > 0 || policy.requestedVoiceChance > 0 || mode === 'proactive')
     ) {
       const text = plan.messages.join('，');
-      const voiceOk = await this.speakInGroup(groupId, text);
+      const voiceOk = await this.speakInGroup(groupId, text, quoteTo);
       if (voiceOk) {
         this.appendAssistant(groupId, text, now);
         return 1;
@@ -1839,7 +1850,10 @@ export class QqBridge {
         this.log('debug', `连发间隔 ${gap} ms`);
         await new Promise<void>((resolve) => setTimeout(resolve, gap));
       }
-      const result = await this.sendSegments(groupId, [{ type: 'text', data: { text } }]);
+      const result = await this.sendSegments(
+        groupId,
+        index === 0 ? [...quoteSegment, { type: 'text', data: { text } }] : [{ type: 'text', data: { text } }],
+      );
       if (!result.ok) {
         this.log('warn', `发送失败（${result.reason}）：${result.message}`);
         break;
@@ -1903,7 +1917,7 @@ export class QqBridge {
   }
 
   /** 在群里说一段话（语音） */
-  private async speakInGroup(groupId: string, text: string): Promise<boolean> {
+  private async speakInGroup(groupId: string, text: string, quoteTo?: string): Promise<boolean> {
     const speaker = this.speaker;
     if (speaker === undefined) return false;
     const tts = this.config.tts;
@@ -1929,7 +1943,12 @@ export class QqBridge {
       this.recordError(`音频落盘失败：${e instanceof Error ? e.message : String(e)}`);
       return false;
     }
-    const sent = await this.sendSegments(groupId, [{ type: 'record', data: { file: path } }]);
+    const sent = await this.sendSegments(
+      groupId,
+      quoteTo === undefined
+        ? [{ type: 'record', data: { file: path } }]
+        : [{ type: 'reply', data: { id: quoteTo } }, { type: 'record', data: { file: path } }],
+    );
     if (!sent.ok) {
       this.log('warn', `语音发送失败（${sent.reason}）：${sent.message}`);
       return false;
@@ -1938,7 +1957,7 @@ export class QqBridge {
   }
 
   /** 在群里唱一首（A 档：TTS 声线 + 音高校准 + 混音） */
-  private async singInGroup(groupId: string, song: string | undefined): Promise<SendResult> {
+  private async singInGroup(groupId: string, song: string | undefined, quoteTo?: string): Promise<SendResult> {
     if (this.singsInFlight >= MAX_CONCURRENT_SING) {
       return { ok: false, reason: 'rate-limited', message: '上一个点歌还在合成，稍等' };
     }
@@ -1997,6 +2016,7 @@ export class QqBridge {
         `唱歌完成：${score.title}，${rendered.report.duration.toFixed(1)} 秒，${rendered.report.notes} 个音`,
       );
       return await this.sendSegments(groupId, [
+        ...(quoteTo === undefined ? [] : [{ type: 'reply', data: { id: quoteTo } }]),
         { type: 'text', data: { text: `♪ ${score.title}` } },
         { type: 'record', data: { file: path } },
       ]);

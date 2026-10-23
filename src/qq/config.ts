@@ -95,6 +95,8 @@ export interface GroupPolicy {
   adaptiveMinTurns: number;
   /** 是否在直接回复后做情绪判断（多一次模型调用） */
   moodJudge: boolean;
+  /** 目标消息已被后续消息隔开时，发送时带 QQ 引用 */
+  quoteWhenSeparated: boolean;
   /** 每群保留的原始消息上限 */
   memoryMaxTurns: number;
   /** 记忆 token 预算（估算） */
@@ -370,6 +372,7 @@ export function defaultGroupPolicy(): GroupPolicy {
     contextMode: 'adaptive',
     adaptiveMinTurns: 4,
     moodJudge: true,
+    quoteWhenSeparated: true,
     memoryMaxTurns: 200,
     memoryMaxTokens: 12000,
     summaryMaxChars: 2000,
@@ -669,6 +672,8 @@ export function normalizeGroupPolicy(raw: unknown, path: string, base = defaultG
       num(src.adaptiveMinTurns, `${path}.adaptiveMinTurns`, base.adaptiveMinTurns, 1, 50),
     ),
     moodJudge: src.moodJudge === undefined ? base.moodJudge : src.moodJudge === true,
+    quoteWhenSeparated:
+      src.quoteWhenSeparated === undefined ? base.quoteWhenSeparated : src.quoteWhenSeparated === true,
     memoryMaxTurns: Math.round(num(src.memoryMaxTurns, `${path}.memoryMaxTurns`, base.memoryMaxTurns, 20, 5000)),
     memoryMaxTokens: Math.round(num(src.memoryMaxTokens, `${path}.memoryMaxTokens`, base.memoryMaxTokens, 500, 200000)),
     summaryMaxChars: Math.round(num(src.summaryMaxChars, `${path}.summaryMaxChars`, base.summaryMaxChars, 200, 20000)),
