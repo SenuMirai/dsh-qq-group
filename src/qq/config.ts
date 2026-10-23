@@ -231,10 +231,16 @@ export interface QqSingConfig {
 /** RVC 外部 worker 配置（语音/唱歌共用） */
 export interface QqRvcConfig {
   enabled: boolean;
+  /** 模型目录：扫描 .pth/.onnx + .index */
+  modelsDir: string;
   /** Python 解释器；空 = python */
   pythonPath: string;
-  /** worker 脚本路径 */
+  /** CPU pth worker 脚本路径 */
   scriptPath: string;
+  /** ONNX/DirectML worker 脚本；空 = 同目录 rvc_onnx_worker.py */
+  onnxScriptPath: string;
+  /** ONNX venv 的 Python；空 = 同目录 venv-onnx */
+  onnxPythonPath: string;
   /** 模型路径；留空回退 sing.rvcModel */
   modelPath: string;
   indexPath: string;
@@ -469,8 +475,11 @@ export function defaultConfig(): QqConfig {
     },
     rvc: {
       enabled: false,
+      modelsDir: '',
       pythonPath: 'python',
       scriptPath: '',
+      onnxScriptPath: '',
+      onnxPythonPath: '',
       modelPath: '',
       indexPath: '',
       device: 'auto',
@@ -827,8 +836,11 @@ export function normalizeConfig(raw: unknown): QqConfig {
     },
     rvc: {
       enabled: rvcSrc.enabled === true,
+      modelsDir: str(rvcSrc.modelsDir, 'rvc.modelsDir', base.rvc.modelsDir),
       pythonPath: str(rvcSrc.pythonPath, 'rvc.pythonPath', base.rvc.pythonPath),
       scriptPath: str(rvcSrc.scriptPath, 'rvc.scriptPath', base.rvc.scriptPath),
+      onnxScriptPath: str(rvcSrc.onnxScriptPath, 'rvc.onnxScriptPath', base.rvc.onnxScriptPath),
+      onnxPythonPath: str(rvcSrc.onnxPythonPath, 'rvc.onnxPythonPath', base.rvc.onnxPythonPath),
       modelPath: str(rvcSrc.modelPath, 'rvc.modelPath', base.rvc.modelPath),
       indexPath: str(rvcSrc.indexPath, 'rvc.indexPath', base.rvc.indexPath),
       device: enumOf(rvcSrc.device, 'rvc.device', base.rvc.device, ['auto', 'cpu', 'dml', 'cuda'] as const),

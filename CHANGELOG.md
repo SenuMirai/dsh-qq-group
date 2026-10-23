@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## 1.9.0 — RVC 模型库与 780M DirectML
+
+- 新增本地 RVC 模型库：自动扫描模型目录，识别 `.pth/.onnx + .index`，列表中选择，不再手填长路径。
+- 语音页支持打开模型目录/刷新模型；同一模型自动去重。
+- 运行设备可切换：自动 / DirectML（780M）/ CPU；选择 ONNX 时自动用 DirectML worker，CPU 用 pth worker。
+- 新增 ONNX RVC worker（tts-with-rvc-onnx + onnxruntime-directml），780M 核显实测可转换中文语音。
+- 音调、推理超时、最长音频改为可拖动滑杆。
+- 模型路径/索引仍保存在配置中；高级路径可手工修改。
+
 ## 1.8.2 — RVC 临时目录兼容
 
 - RVC 适配器把临时工作目录放到插件用户数据目录 `cache/rvc`，避免系统临时目录在部分 Windows/沙箱环境下无法写入。

@@ -211,6 +211,16 @@ DSH 设置 →「QQ 群聊」→「连接」：
 
 
 
+
+
+### v1.9.0 RVC 模型库与 780M
+
+- 语音页自动扫描模型目录，列出 .pth/.onnx + index；不再手填长路径。
+- 加入模型列表、打开目录、刷新和去重；可添加多个模型随时切换。
+- 运行设备切换：自动 / DirectML（780M）/ CPU；ONNX 自动走 DirectML worker。
+- 音调、推理超时、最长音频改为滑杆。
+- 新增 ONNX worker + onnxruntime-directml，780M 实测可转换中文语音。
+
 ### v1.8.0 RVC 外部 worker 接口
 
 - 可选 RVC：edge-tts 干音 → 外部 Python worker → 变声 WAV → QQ 语音。
@@ -515,6 +525,16 @@ Each project keeps its own license; this project borrows design ideas only and d
 
 
 
+
+
+
+### v1.9.0 RVC model library and 780M
+
+- Voice tab scans the model directory and lists .pth/.onnx + index; no long paths.
+- Model dropdown, open folder, refresh and dedupe; multiple models switchable.
+- Device switch: auto / DirectML (780M) / CPU; ONNX automatically uses the DirectML worker.
+- Pitch, timeout and max duration are sliders.
+- Added ONNX worker + onnxruntime-directml; verified Chinese conversion on the 780M.
 
 ### v1.8.0 RVC external worker
 

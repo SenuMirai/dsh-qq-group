@@ -28,7 +28,7 @@
  */
 
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 import { policyFor, type GroupPolicy, type QqConfig } from './config';
 import { createOpenAiClient, parseReplyPlan, type ChatClient, type ChatImage } from './llm';
@@ -530,17 +530,31 @@ export class QqBridge {
     });
     if (this.config.rvc.enabled) {
       const modelPath = this.config.rvc.modelPath || this.config.sing.rvcModel;
+      const onnxModel = modelPath.toLowerCase().endsWith('.onnx');
+      const wantGpu =
+        this.config.rvc.device === 'auto' ||
+        this.config.rvc.device === 'dml' ||
+        this.config.rvc.device === 'cuda';
+      const useOnnx = wantGpu && onnxModel;
+      const baseDir = this.config.rvc.modelsDir || dirname(modelPath);
+      const pythonPath = useOnnx
+        ? this.config.rvc.onnxPythonPath || join(baseDir, 'venv-onnx', 'Scripts', 'python.exe')
+        : this.config.rvc.pythonPath;
+      const scriptPath = useOnnx
+        ? this.config.rvc.onnxScriptPath || join(baseDir, 'rvc_onnx_worker.py')
+        : this.config.rvc.scriptPath;
       this.rvcConverter =
-        this.config.rvc.scriptPath.trim() !== '' && modelPath.trim() !== ''
+        scriptPath.trim() !== '' && modelPath.trim() !== ''
           ? createCommandRvcConverter({
-              pythonPath: this.config.rvc.pythonPath,
-              scriptPath: this.config.rvc.scriptPath,
+              pythonPath,
+              scriptPath,
               modelPath,
               indexPath: this.config.rvc.indexPath,
-              device: this.config.rvc.device,
+              device: useOnnx ? 'dml' : 'cpu',
               pitch: this.config.rvc.pitch,
               timeoutMs: this.config.rvc.timeoutMs,
               maxSeconds: this.config.rvc.maxSeconds,
+              tempDir: join(this.deps.userRoot, 'cache', 'rvc'),
             })
           : undefined;
     } else {

@@ -42,6 +42,7 @@ import {
   selfieFile,
 } from './qq/selfies';
 import { DEFAULT_SCORE_WEIGHTS, type ScoreRules, type ScoreWeights } from './qq/triggers';
+import { scanRvcModels } from './qq/rvc-models';
 import {
   getProfile,
   listProfiles,
@@ -1294,6 +1295,27 @@ export function apply(ctx: any): void {
           maxMB: readSettings(root).stickerMaxMB,
           dir,
         });
+      }
+
+      if (rest === 'rvc/models' || rest === 'rvc/open') {
+        const cfg = readQqConfig(qqConfigPath(root)).config;
+        const dir = cfg.rvc?.modelsDir ?? '';
+        if (method === 'POST' && rest === 'rvc/open') {
+          if (process.platform !== 'win32') return send(200, { ok: false, message: '只有 Windows 支持直接打开文件夹' });
+          if (dir === '') return send(200, { ok: false, message: '还没有设置模型目录' });
+          try {
+            mkdirSync(dir, { recursive: true });
+            spawn('explorer.exe', [dir], { detached: true, stdio: 'ignore' }).unref();
+            return send(200, { ok: true, path: dir });
+          } catch (e) {
+            return send(200, { ok: false, message: e instanceof Error ? e.message : String(e) });
+          }
+        }
+        if (rest === 'rvc/models' && method === 'GET') {
+          if (dir === '') return send(200, { ok: false, message: '还没有设置 RVC 模型目录', models: [] });
+          return send(200, { ok: true, dir, models: scanRvcModels(dir) });
+        }
+        return send(405, { error: 'method not allowed' });
       }
 
       if (rest === 'mood') {
