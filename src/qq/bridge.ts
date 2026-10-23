@@ -1750,7 +1750,10 @@ export class QqBridge {
         const speakerId = message?.userId ?? this.lastSpeaker.get(groupId) ?? '';
         const profile = speakerId === '' ? undefined : this.deps.profiles?.get(groupId, speakerId);
         const context = transcript(recentTurns(group, 6), this.config.selfName, Date.now());
-        const thought = plan.thought?.trim() || '（这次模型没有写内心吐槽）';
+        const thought =
+          plan.thought?.trim() ||
+          (await this.generateThought(groupId, message, plan.messages.join(' / '))) ||
+          '（这次模型没有写内心吐槽）';
         this.deps.onDiary?.({
           ts: Date.now(),
           groupId,
@@ -1896,11 +1899,22 @@ export class QqBridge {
       if (mode === 'proactive') break; // 主动开口只发一条，不连发
     }
 
-    // 表情包：模型点名 或 群友明确要求；这个群允许发图、概率命中才真发
+    // 表情包：模型点名 / 群友明确要求 / 按 imageChance 独立自动掷骰
     // 自拍请求优先发自拍，不再额外塞一张普通表情包
     const sticker = selfieRequested ? undefined : plan.sticker;
-    const stickerChance = imageRequested ? policy.requestedImageChance : policy.imageChance;
-    const wantsSticker = !selfieRequested && (sticker !== undefined || imageRequested);
+    const autoSticker =
+      !selfieRequested &&
+      sticker === undefined &&
+      !imageRequested &&
+      policy.imageEnabled &&
+      policy.imageChance > 0 &&
+      Math.random() < policy.imageChance;
+    const wantsSticker = !selfieRequested && (sticker !== undefined || imageRequested || autoSticker);
+    const stickerChance = imageRequested
+      ? policy.requestedImageChance
+      : autoSticker
+        ? 1
+        : policy.imageChance;
     if (wantsSticker && policy.imageEnabled && stickerChance > 0 && Math.random() < stickerChance) {
       const file = this.deps.stickers?.select?.(sticker) ?? this.deps.stickers?.resolve(sticker ?? '');
       if (file !== undefined) {
@@ -2321,6 +2335,43 @@ export class QqBridge {
    * 按群心情：直接把这一轮用户话/她的回复交给模型判一次。
    * 只在直接对话后跑；失败静默，不阻塞聊天。
    */
+  /** 主回复没写 thought 时，单独补一次很短的内心吐槽；失败返回 undefined。 */
+  private async generateThought(
+    groupId: string,
+    message: GroupMessage | undefined,
+    reply: string,
+  ): Promise<string | undefined> {
+    if (this.llm === undefined) return undefined;
+    try {
+      const system = [
+        `你是 QQ 群里的「${this.config.selfName}」，现在在写只给自己看的日记。`,
+        '根据这轮对话，写 1~2 句第一人称内心吐槽。',
+        '只输出吐槽正文：不要 JSON、不要引号、不要解释、不要写“我心想”。',
+        '可以嘴硬、犯花痴、嫌烦、得意，但要像你自己。',
+      ].join('\n');
+      const user = [
+        `群友说：${message?.text ?? '（主动开口）'}`,
+        `你回：${reply.slice(0, 500)}`,
+      ].join('\n');
+      const result = await this.llm.chat(
+        [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+        { timeoutMs: 10_000, maxTokens: 120, purpose: 'thought', groupId },
+      );
+      if (!result.ok) return undefined;
+      const text = result.text
+        .trim()
+        .replace(/^["“'‘]+|["”'’]+$/g, '')
+        .trim()
+        .slice(0, 240);
+      return text === '' ? undefined : text;
+    } catch {
+      return undefined;
+    }
+  }
+
   private async judgeMood(groupId: string, userText: string, replyText: string): Promise<void> {
     const policy = this.policyOf(groupId);
     if (policy.moodEnabled === false || policy.moodJudge === false || this.llm === undefined || this.moodJudging.has(groupId)) return;

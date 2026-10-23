@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 1.18.9 — 自动表情与日记 thought 兜底
+
+- 表情包不再等模型点名：每轮按群 `imageChance` 独立掷骰，命中后按仓库权重挑图；明确要图仍走 requestedImageChance。
+- 自拍请求仍优先，且不额外塞普通表情包。
+- 主回复没写 thought 时，单独做一次很短的第一人称内心吐槽调用（purpose=thought，maxTokens=120），再写日记。
+- 这会增加少量 token：只在 thought 缺失时触发，每次约一两百 token。
+- 三个群配置已核对：imageEnabled=true，imageChance 分别为 0.4 / 0.35 / 0.3。
+
 ## 1.18.8 — 自拍独立发送与聊天记录不引用
 
 - 自拍改为文字发送后独立执行：明确要自拍/看尾巴时，不再依赖模型文本是否同意。
