@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 1.11.0 — Kokoro 核显 TTS
+
+- 新增 Kokoro-82M 本地 TTS 后端，ONNX Runtime **DirectML**，适配 780M 核显。
+- 独立 Kokoro HTTP 网关（默认 50122）；实测短句约 6 秒，明显快于 CosyVoice2 的 CPU 推理。
+- 语音后端列表新增 Kokoro；切换时自动填 50122。
+- Kokoro 支持中文内置音色（如 zf_005），风格字段可填 zf_/zm_ 音色名；自由情感描述仍以 CosyVoice2 更合适。
+- IndexTTS-2.5 选项保留，服务仍未部署。
+
 ## 1.10.1 — RVC 精细参数与试听按钮
 
 - RVC 新增可调参数：特征检索 indexRate、咬字保护 protect、音高平滑 filterRadius、响度混合 rmsMixRate、音高算法 rmvpe/pm。

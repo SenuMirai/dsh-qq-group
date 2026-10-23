@@ -221,6 +221,16 @@ DSH 设置 →「QQ 群聊」→「连接」：
 
 
 
+
+
+### v1.11.0 Kokoro 核显 TTS
+
+- 新增 Kokoro-82M 本地 TTS 后端，ONNX Runtime DirectML，适配 780M 核显。
+- 独立 Kokoro HTTP 网关（默认 50122）；短句实测约 6 秒。
+- 语音后端列表新增 Kokoro；切换时自动填 50122。
+- Kokoro 支持中文内置音色（如 zf_005）；自由情感描述仍以 CosyVoice2 更合适。
+- IndexTTS-2.5 选项保留，服务仍未部署。
+
 ### v1.10.0 本地 TTS 后端列表
 
 - 语音页新增后端选择：Edge TTS / CosyVoice2 / IndexTTS-2.5。
@@ -572,6 +582,16 @@ Each project keeps its own license; this project borrows design ideas only and d
 
 
 
+
+
+
+### v1.11.0 Kokoro GPU TTS
+
+- Added Kokoro-82M local TTS with ONNX Runtime DirectML for the 780M iGPU.
+- Separate Kokoro HTTP gateway (default 50122); short sentences take about 6s.
+- Added Kokoro to the voice backend list; selecting it fills 50122 automatically.
+- Kokoro supports Chinese built-in voices (e.g. zf_005); CosyVoice2 remains better for free-form emotion descriptions.
+- IndexTTS-2.5 option remains reserved; its service is still not deployed.
 
 ### v1.10.0 Local TTS backend list
 
