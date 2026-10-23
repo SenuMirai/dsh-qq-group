@@ -861,16 +861,16 @@ export class QqBridge {
     }
 
     const trigger = classifyTrigger(message, policy, this.config.selfName);
-    // 明确让她看图：即使没 @ / 没叫名字，也按直接对话处理
+    const selfieRequest = policy.selfieEnabled && asksForSelfie(message.text, policy.selfieKeywords);
+    // 明确让她看图：即使没 @ / 没叫名字，也按直接对话处理；但如果是在要自拍/尾巴，优先自拍
     const imageRequest =
+      !selfieRequest &&
       (message.hasImage || message.replyToId !== undefined) &&
       policy.imageView !== 'off' &&
       (asksToSeeImage(message.text) || /^(看看|看下|看一下|瞅瞅|瞧瞧)$/.test(message.text.trim()));
     // 明确要求她发图/发表情包：也按直接对话处理
     const rawImageSendRequest = policy.imageEnabled && asksToSendImage(message.text);
     // 想看她的尾巴/耳朵/本人，或“爆个照”：走自拍库，不抢有图时的识图
-    const selfieRequest =
-      policy.selfieEnabled && !imageRequest && asksForSelfie(message.text, policy.selfieKeywords);
     const imageSendRequest = rawImageSendRequest && !selfieRequest;
     // 明确要求发语音/唱歌：按直接对话处理
     const voiceRequest = asksForVoice(message.text);
@@ -1708,6 +1708,9 @@ export class QqBridge {
       // 明确要语音时，不要被模型自作主张选成唱歌
       if (voiceRequest && !singRequest && plan.action === 'sing') plan = { ...plan, action: 'text' };
       const selectedSelfie = selfieRequest && message !== undefined ? this.deps.selfies?.pick(message.text) : undefined;
+      if (selfieRequest && selectedSelfie === undefined) {
+        this.log('warn', '识别到自拍请求，但没有可用素材或选择失败');
+      }
       // 语音概率独立掷骰：不再等模型“选 voice”。
       // 被明确要求发语音时用 requestedVoiceChance；否则用普通 voiceChance。
       const spokenText = plan.messages.join('，');
@@ -1760,6 +1763,7 @@ export class QqBridge {
           ...(decision === undefined ? {} : { score: decision.score, reasons: decision.reasons }),
           ...(profile === undefined ? {} : { familiarity: profile.familiarity, affinity: profile.affinity }),
         });
+        this.lastDecision.delete(groupId);
       }
 
       const quoteTarget =
