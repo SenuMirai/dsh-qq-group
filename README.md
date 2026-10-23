@@ -1,4 +1,4 @@
-﻿# dsh-qq-group
+# dsh-qq-group
 
 独立的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) QQ 群聊插件：有人设、有记忆、会判断该不该接话，支持主动/被动搭话、语音、唱歌、表情包、日记和视觉看图。
 
@@ -16,17 +16,20 @@ A standalone QQ group-chat plugin for [DeepSeek Harness](https://github.com/deep
 | 能力 | 说明 |
 |---|---|
 | **OneBot 11 / NapCat** | 通过 WebSocket 连接 NapCatQQ，支持自动重连、启动检查、自动拉起 |
-| **人设与模型** | 使用 DSH 当前模型；可单独为群聊选择 provider/model、推理档位与备用模型 |
+| **人设与模型** | 多张人设卡；可按群绑定，一张卡可绑多个群，未绑定跟随全局；模型 provider/model、推理档位、备用模型可按群单独选 |
+| **主动搭话** | 独立页：冷场阈值、概率/峰谷命中线、近远时机、冷却、每日上限、安静时段、试运行、主动语音概率 |
 | **价值评分 v3** | 不是每条都回：@/叫名字/引用直接回；普通闲聊按关键词、成员、上下文、熟识度、好感度、夜间等算 0~100 分 |
 | **冷场逻辑** | 任何人类消息都会重置接话去抖和主动开口倒计时；群里一直有人说话时她不插话 |
 | **直接对话队列** | 她正在生成时收到的 @/引用会排队，不会丢；主动开口会给 @ 让位 |
 | **群友画像** | 每群每人独立熟识度 0~100、好感度 -100~+100，按发言、被点名、被回复、连续性、敌意判定更新 |
-| **日记** | 每条回复记录上下文、评分理由、内心吐槽；支持筛选、导出、删除单条/按人删除 |
+| **日记** | 每条回复记录上下文、评分理由、内心吐槽；thought 放在 JSON 第一项；支持筛选、导出、删除单条/按人删除 |
 | **表情包** | 自动收藏群友图片，AI 重命名/打标签，按语境挑选发送；可设数量与磁盘上限 |
-| **语音 / 唱歌** | edge-tts 语音（无需显卡），语气预设、试听、按群概率；离线唱歌与内置曲库 |
-| **视觉看图** | 可选把 QQ 图片真正交给视觉模型：@ / 强相关上下文 / 文字问看法可多选，控制 token |
+| **语音 / 唱歌** | Edge / CosyVoice2 / Kokoro / GPT-SoVITS 多后端切换，RVC 变声、语气预设、试听、按群概率；离线唱歌与内置曲库 |
+| **视觉看图** | 可选把 QQ 图片真正交给视觉模型：@ / 强相关上下文 / 文字问看法可多选；支持本地图片路径与文件头识别 |
+| **回复引用** | 目标消息被后续消息隔开时自动带 QQ 引用，可开关；文件/合并转发/语音不引用，失败自动改发纯文字 |
+| **省 token** | 自适应上下文（自包含短句少读、指代/追问读全量）、contextTurns、记忆注入条数、情绪/敌意判断开关 |
 | **夜间免打扰** | 支持跨午夜；命中扣分可调（0~100，默认 20） |
-| **用量统计** | 按 DSH usage 记录 token，按模型单价折算积分；支持月历、余额估算、换模型保留历史 |
+| **用量统计** | 按群、按用途、按模型统计 token；图片调用与估算调用单独标记；月历、余额估算、单价校准 |
 | **稳定性** | 事件/定时器/异步回复全部兜异常；模型只回 reasoning 时自动提取/重试/备用模型 |
 
 ### 部署要求
@@ -225,6 +228,17 @@ DSH 设置 →「QQ 群聊」→「连接」：
 
 
 
+### v1.18.4 日记格式与近期更新
+
+- v1.18.4：`thought` 移到 JSON 第一项，减少模型截断导致日记缺失内心吐槽。
+- v1.18.3：自动引用只对文字/图片生效，文件/合并转发/语音不再触发“该消息类型暂不支持查看”；引用发送失败自动改发纯文字。
+- v1.18.2：新增群聊入口置顶到插件设置顶部，独立于所有页签。
+- v1.18.1：本地 TTS 增加 2.5 秒健康检查，网关未启动时回退 Edge，不再卡住或静默失败。
+- v1.18.0：目标消息被后续消息隔开时自动带 QQ 引用，可开关。
+- v1.17.0：省 token 开关与自适应上下文；单价保存修复；情绪/敌意判断可关。
+- v1.16.0：主动搭话独立页；用量按群、按用途统计。
+- v1.15.x：人设独立分栏与按群绑定；恢复经典鲸鱼娘/贴吧人设；看图支持本地路径与文件头识别。
+
 ### v1.14.0 GPT-SoVITS 本地后端
 
 - 新增 GPT-SoVITS 后端，适配网关默认 50123，后端 API 9880。
@@ -387,17 +401,20 @@ MIT，© 2026 SenuMirai。见 [LICENSE](./LICENSE)。
 | Feature | Details |
 |---|---|
 | **OneBot 11 / NapCat** | WebSocket connection to NapCatQQ; reconnect, startup checks, optional auto-launch |
-| **Persona & model** | Uses DSH models; choose provider/model, reasoning effort and fallback per group chat |
+| **Persona & model** | Multiple persona cards; bind per group (one card can serve many groups), otherwise follow global; provider/model, reasoning effort and fallback can be per group |
+| **Proactive chat** | Dedicated tab: idle threshold, peak/off-peak hit lines, timing factors, cooldown, daily cap, quiet hours, trial mode, proactive voice chance |
 | **Value scoring v3** | Not a reply to everything: @/name/quote always reply; ambient chat is scored 0–100 from keywords, members, context, familiarity, affinity and night penalty |
 | **Cold-start logic** | Any human message resets both the reply debounce and proactive countdown; she stays quiet while the group is active |
 | **Direct-message queue** | @/quote messages received while generating are queued, never dropped; proactive messages yield to direct ones |
 | **Member profiles** | Per-group, per-user familiarity 0–100 and affinity -100–+100, updated by speech, mentions, replies, continuity and hostility |
-| **Diary** | Every reply records context, score reasons and inner thought; filter, export, delete one/person |
+| **Diary** | Every reply records context, score reasons and inner thought; `thought` is the first JSON field; filter, export, delete one/person |
 | **Stickers** | Auto-collect group images, AI rename/tag, context-aware sending; count and disk caps |
-| **Voice / singing** | edge-tts (no GPU), tone presets, preview, per-group probability; offline singing and built-in scores |
-| **Vision** | Optionally pass real QQ images to a vision model: @ / strong context / opinion questions, multi-select to control tokens |
+| **Voice / singing** | Edge / CosyVoice2 / Kokoro / GPT-SoVITS backends, RVC conversion, tone presets, preview, per-group probability; offline singing and built-in scores |
+| **Vision** | Optionally pass real QQ images to a vision model: @ / strong context / opinion questions; local paths and magic-byte detection supported |
+| **Reply quoting** | Auto-quote when the target is separated by newer messages; toggleable; files/forwards/voice are skipped and failed quotes retry as plain text |
+| **Token saving** | Adaptive context (fewer turns for self-contained messages, full context for references), contextTurns, memory injection count, mood/hostility toggles |
 | **Night DND** | Cross-midnight window; configurable score penalty (0–100, default 20) |
-| **Usage stats** | Real DSH usage tokens, per-model rates, calendar, balance estimate, history preserved across model switches |
+| **Usage stats** | Token usage by group, purpose and model; image/estimated calls marked; calendar, balance estimate, rate calibration |
 | **Stability** | Guards around events/timers/async replies; extracts JSON from reasoning, retries, optional fallback model |
 
 ### Requirements
