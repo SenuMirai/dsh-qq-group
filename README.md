@@ -223,6 +223,15 @@ DSH 设置 →「QQ 群聊」→「连接」：
 
 
 
+
+
+### v1.14.0 GPT-SoVITS 本地后端
+
+- 新增 GPT-SoVITS 后端，适配网关默认 50123，后端 API 9880。
+- 网关把 POST /tts 转成 GPT-SoVITS GET /tts，返回 WAV。
+- v1 基础模型 CPU 短句约 2.4 秒；角色模型尚未训练。
+- 参考音频目前是本地合成女声，后续可替换为鲸鱼娘角色模型。
+
 ### v1.11.0 Kokoro 核显 TTS
 
 - 新增 Kokoro-82M 本地 TTS 后端，ONNX Runtime DirectML，适配 780M 核显。
@@ -584,6 +593,15 @@ Each project keeps its own license; this project borrows design ideas only and d
 
 
 
+
+
+
+### v1.14.0 GPT-SoVITS backend
+
+- Added GPT-SoVITS backend; adapter gateway on 50123, API on 9880.
+- The gateway translates POST /tts into GPT-SoVITS GET /tts and returns WAV.
+- v1 base model on CPU: short sentence about 2.4s; character model not trained yet.
+- Reference audio is a locally generated female voice; replaceable with the trained character model later.
 
 ### v1.11.0 Kokoro GPU TTS
 
