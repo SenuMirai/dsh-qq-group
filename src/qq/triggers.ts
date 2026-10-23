@@ -150,6 +150,10 @@ export function decideSpeak(input: {
   let matched: string | undefined;
   let directish = false;
   reasons.push(`基础 ${w.base}`);
+  if (input.rules?.owner === true) {
+    score += 35;
+    reasons.push('主人 +35');
+  }
 
   const keyword = matchKeyword(texts, policy);
   const member = input.userId === undefined ? undefined : matchMember(input.userId, policy);

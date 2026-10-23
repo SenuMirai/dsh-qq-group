@@ -1626,6 +1626,23 @@ export class QqBridge {
         policy.selfieEnabled &&
         !message.hasImage &&
         asksForSelfie(message.text, policy.selfieKeywords);
+      // 明确自拍请求：在模型生成前先把图发出去，避免模型拒绝/分支提前返回吞图。
+      if (selfieRequest && message !== undefined) {
+        const chosen = this.deps.selfies?.pick(message.text);
+        const file = chosen === undefined ? undefined : this.deps.selfies?.resolve(chosen.file);
+        if (chosen !== undefined && file !== undefined) {
+          const imageSent = await this.sendSegments(groupId, [{ type: 'image', data: { file } }]);
+          if (imageSent.ok) {
+            this.deps.selfies?.markUsed?.(chosen.file);
+            this.appendAssistant(groupId, '（发了张鲸鱼娘自拍）', Date.now());
+            this.log('info', `自拍已发送：${chosen.file}`);
+          } else {
+            this.log('warn', `自拍发送失败（${imageSent.reason}）：${imageSent.message}`);
+          }
+        } else {
+          this.log('warn', '识别到自拍请求，但没有可用素材或选择失败');
+        }
+      }
       const imageSendRequest = rawImageSendRequest && !selfieRequest;
       const voiceRequest = message !== undefined && asksForVoice(message.text);
       const singRequest = message !== undefined && asksForSong(message.text);
@@ -1716,10 +1733,6 @@ export class QqBridge {
       if ((imageSendRequest || selfieRequest) && !singRequest && plan.action !== 'text') plan = { ...plan, action: 'text' };
       // 明确要语音时，不要被模型自作主张选成唱歌
       if (voiceRequest && !singRequest && plan.action === 'sing') plan = { ...plan, action: 'text' };
-      const selectedSelfie = selfieRequest && message !== undefined ? this.deps.selfies?.pick(message.text) : undefined;
-      if (selfieRequest && selectedSelfie === undefined) {
-        this.log('warn', '识别到自拍请求，但没有可用素材或选择失败');
-      }
       // 语音概率独立掷骰：不再等模型“选 voice”。
       // 被明确要求发语音时用 requestedVoiceChance；否则用普通 voiceChance。
       const spokenText = plan.messages.join('，');
@@ -1756,6 +1769,7 @@ export class QqBridge {
       // 日记：每条真正生成的回复都记；模型没写 thought 也记一条，避免“日记不更新”
       {
         const decision = this.lastDecision.get(groupId);
+        const usableDecision = decision !== undefined && (decision.directish === true || mode === 'at') ? decision : undefined;
         const speakerId = message?.userId ?? this.lastSpeaker.get(groupId) ?? '';
         const profile = speakerId === '' ? undefined : this.deps.profiles?.get(groupId, speakerId);
         const context = transcript(recentTurns(group, 6), this.config.selfName, Date.now());
@@ -1772,10 +1786,9 @@ export class QqBridge {
           context,
           reply: plan.messages.join(' / '),
           thought,
-          ...(decision === undefined ? {} : { score: decision.score, reasons: decision.reasons }),
+          ...(usableDecision === undefined ? {} : { score: usableDecision.score, reasons: usableDecision.reasons }),
           ...(profile === undefined ? {} : { familiarity: profile.familiarity, affinity: profile.affinity }),
         });
-        this.lastDecision.delete(groupId);
       }
 
       const quoteTarget =
@@ -1789,26 +1802,7 @@ export class QqBridge {
         message.hasVoice !== true
           ? message.messageId
           : undefined;
-      let sentCount = await this.deliver(groupId, policy, plan, now, mode, imageSendRequest, selfieRequest, selectedSelfie, quoteTarget);
-      if (selfieRequest && selectedSelfie !== undefined) {
-        const file = this.deps.selfies?.resolve(selectedSelfie.file);
-        if (file !== undefined) {
-          const imageSegments = [
-            ...(quoteTarget === undefined ? [] : [{ type: 'reply', data: { id: quoteTarget } }]),
-            { type: 'image', data: { file } },
-          ];
-          const imageSent = await this.sendSegments(groupId, imageSegments);
-          if (imageSent.ok) {
-            sentCount += 1;
-            this.deps.selfies?.markUsed?.(selectedSelfie.file);
-            this.appendAssistant(groupId, '（发了张鲸鱼娘自拍）', Date.now());
-          } else {
-            this.log('warn', `自拍发送失败（${imageSent.reason}）：${imageSent.message}`);
-          }
-        } else {
-          this.log('warn', `自拍素材文件不存在：${selectedSelfie.file}`);
-        }
-      }
+      let sentCount = await this.deliver(groupId, policy, plan, now, mode, imageSendRequest, selfieRequest, undefined, quoteTarget);
       if (sentCount > 0) {
         const stat = this.statOf(groupId);
         stat.replied += sentCount;
