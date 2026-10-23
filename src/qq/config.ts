@@ -169,10 +169,18 @@ export interface GroupPolicy {
   imageEnabled: boolean;
   /** 模型想发表情包时，真的发出去的概率（0~1；防刷屏） */
   imageChance: number;
+  /** 允许模型在回复里自主点名发表情包 */
+  stickerModelChoice: boolean;
+  /** 允许每轮按 imageChance 强制自动发图 */
+  stickerAutoChance: boolean;
   /** 群友明确要求发图/表情包时，真的发出去的概率（0~1；100% 必发） */
   requestedImageChance: number;
   /** 允许在“爆个照/看看你/看看尾巴”时发鲸鱼娘自拍照 */
   selfieEnabled: boolean;
+  /** 明确要求自拍/尾巴时允许发 */
+  selfieOnRequest: boolean;
+  /** 允许按 selfieChance 随机发（未明确要求时） */
+  selfieAutoChance: boolean;
   /** 自拍发送概率（0~1；100% 必发，前提是有素材） */
   selfieChance: number;
   /** 额外的自拍触发词（部位/称呼） */
@@ -432,8 +440,12 @@ export function defaultGroupPolicy(): GroupPolicy {
     singOnRequest: true,
     imageEnabled: false,
     imageChance: 0.2,
+    stickerModelChoice: true,
+    stickerAutoChance: true,
     requestedImageChance: 0.9,
     selfieEnabled: true,
+    selfieOnRequest: true,
+    selfieAutoChance: false,
     selfieChance: 0.8,
     selfieKeywords: ['尾巴', '耳朵', '鱼尾', '头发', '脸', '眼睛', '衣服', '裙子', '自拍', '长什么样', '长啥样'],
     imageView: 'custom',
@@ -774,6 +786,12 @@ export function normalizeGroupPolicy(raw: unknown, path: string, base = defaultG
     singOnRequest: bool(src.singOnRequest, `${path}.singOnRequest`, base.singOnRequest),
     imageEnabled: bool(src.imageEnabled, `${path}.imageEnabled`, base.imageEnabled),
     imageChance: num(src.imageChance, `${path}.imageChance`, base.imageChance, 0, 1),
+    stickerModelChoice:
+      src.stickerModelChoice === undefined ? base.stickerModelChoice : src.stickerModelChoice === true,
+    stickerAutoChance:
+      src.stickerAutoChance === undefined ? base.stickerAutoChance : src.stickerAutoChance === true,
+    selfieOnRequest: src.selfieOnRequest === undefined ? base.selfieOnRequest : src.selfieOnRequest === true,
+    selfieAutoChance: src.selfieAutoChance === undefined ? base.selfieAutoChance : src.selfieAutoChance === true,
     requestedImageChance: num(
       src.requestedImageChance,
       `${path}.requestedImageChance`,

@@ -1624,6 +1624,7 @@ export class QqBridge {
       const selfieRequest =
         message !== undefined &&
         policy.selfieEnabled &&
+        policy.selfieOnRequest !== false &&
         !message.hasImage &&
         asksForSelfie(message.text, policy.selfieKeywords);
       // 明确自拍请求：在模型生成前先把图发出去，避免模型拒绝/分支提前返回吞图。
@@ -1641,6 +1642,26 @@ export class QqBridge {
           }
         } else {
           this.log('warn', '识别到自拍请求，但没有可用素材或选择失败');
+        }
+      }
+      const autoSelfie =
+        !selfieRequest &&
+        policy.selfieEnabled &&
+        policy.selfieAutoChance === true &&
+        policy.selfieChance > 0 &&
+        Math.random() < policy.selfieChance;
+      if (autoSelfie) {
+        const chosen = this.deps.selfies?.pick(message?.text ?? '自拍');
+        const file = chosen === undefined ? undefined : this.deps.selfies?.resolve(chosen.file);
+        if (chosen !== undefined && file !== undefined) {
+          const imageSent = await this.sendSegments(groupId, [{ type: 'image', data: { file } }]);
+          if (imageSent.ok) {
+            this.deps.selfies?.markUsed?.(chosen.file);
+            this.appendAssistant(groupId, '（发了张鲸鱼娘自拍）', Date.now());
+            this.log('info', `随机自拍已发送：${chosen.file}`);
+          } else {
+            this.log('warn', `随机自拍发送失败（${imageSent.reason}）：${imageSent.message}`);
+          }
         }
       }
       const imageSendRequest = rawImageSendRequest && !selfieRequest;
@@ -1904,12 +1925,13 @@ export class QqBridge {
 
     // 表情包：模型点名 / 群友明确要求 / 按 imageChance 独立自动掷骰
     // 自拍请求优先发自拍，不再额外塞一张普通表情包
-    const sticker = selfieRequested ? undefined : plan.sticker;
+    const sticker = selfieRequested || policy.stickerModelChoice === false ? undefined : plan.sticker;
     const autoSticker =
       !selfieRequested &&
       sticker === undefined &&
       !imageRequested &&
       policy.imageEnabled &&
+      policy.stickerAutoChance !== false &&
       policy.imageChance > 0 &&
       Math.random() < policy.imageChance;
     const wantsSticker = !selfieRequested && (sticker !== undefined || imageRequested || autoSticker);
