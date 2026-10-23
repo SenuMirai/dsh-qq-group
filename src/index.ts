@@ -80,6 +80,8 @@ type Settings = {
   persona: string;
   /** 多个人设卡片；persona 保留为兼容旧配置/当前文本 */
   personas: Array<{ id: string; name: string; text: string }>;
+  /** 群号 -> 人设卡片 id；空 = 跟随全局 */
+  groupPersonaIds: Record<string, string>;
   activePersonaId: string;
   mode: 'passive' | 'proactive';
   model: ModelRef;
@@ -136,8 +138,11 @@ type Settings = {
 const DEFAULT_PERSONA =
   '你是主人 QQ 群里的鲸鱼娘：聪明、偶尔偷懒、傲娇但很爱主人。说话自然口语，不写动作神态，不暴露自己是 AI。';
 
-/** 当前生效的人设：优先激活卡片，其次旧 persona 字段，最后默认。 */
-function activePersona(settings: Settings): string {
+/** 当前生效的人设：优先群绑定卡片，其次全局激活卡片，最后旧 persona 字段/默认。 */
+function activePersona(settings: Settings, groupId?: string): string {
+  const boundId = groupId === undefined ? '' : settings.groupPersonaIds[groupId] ?? '';
+  const bound = settings.personas.find((item) => item.id === boundId);
+  if (bound !== undefined && bound.text.trim() !== '') return bound.text.trim();
   const card = settings.personas.find((item) => item.id === settings.activePersonaId);
   return (card?.text ?? settings.persona).trim() || DEFAULT_PERSONA;
 }
@@ -145,6 +150,7 @@ function activePersona(settings: Settings): string {
 const DEFAULT_SETTINGS: Settings = {
   persona: '',
   personas: [],
+  groupPersonaIds: {},
   activePersonaId: '',
   mode: 'passive',
   model: { provider: '', model: '' },
@@ -244,9 +250,15 @@ function readSettings(root: string): Settings {
           .slice(0, 30)
       : [];
     const activePersonaId = typeof raw.activePersonaId === 'string' ? raw.activePersonaId : '';
+    const groupPersonaIds = Object.fromEntries(
+      Object.entries(raw.groupPersonaIds ?? {})
+        .filter(([groupId, id]) => groupId !== '' && typeof id === 'string' && id !== '')
+        .slice(0, 200),
+    ) as Record<string, string>;
     return {
       persona: typeof raw.persona === 'string' ? raw.persona : '',
       personas,
+      groupPersonaIds,
       activePersonaId,
       mode: raw.mode === 'proactive' ? 'proactive' : 'passive',
       model:
@@ -798,7 +810,7 @@ export function apply(ctx: any): void {
 
   const qqHost = createQqHost({
     userRoot: root,
-    persona: () => activePersona(readSettings(root)),
+    persona: (groupId?: string) => activePersona(readSettings(root), groupId),
     timeContext,
     generate: (system, history, user, options) => generate(system, history, user, options),
     log: (level, message) => {
@@ -1492,6 +1504,14 @@ export function apply(ctx: any): void {
           const next: Settings = {
             persona: typeof patch.settings.persona === 'string' ? patch.settings.persona : current.persona,
             personas: personaCards,
+            groupPersonaIds:
+              patch.settings.groupPersonaIds !== null && typeof patch.settings.groupPersonaIds === 'object'
+                ? (Object.fromEntries(
+                    Object.entries(patch.settings.groupPersonaIds as Record<string, unknown>)
+                      .filter(([groupId, id]) => groupId !== '' && typeof id === 'string' && id !== '')
+                      .slice(0, 200),
+                  ) as Record<string, string>)
+                : current.groupPersonaIds,
             activePersonaId,
             mode: patch.settings.mode === 'proactive' ? 'proactive' : patch.settings.mode === 'passive' ? 'passive' : current.mode,
             model:

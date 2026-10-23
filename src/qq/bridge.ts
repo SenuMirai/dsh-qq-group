@@ -121,7 +121,7 @@ export interface BridgeDeps {
   /** 插件用户目录（$DSH_HOME/dsh-whale-girl） */
   userRoot: string;
   /** 人设读取（宿主传现有的 readPersonaOverride；云端读 persona.json） */
-  persona: () => string;
+  persona: (groupId?: string) => string;
   /** 日志 */
   log: (level: 'debug' | 'info' | 'warn' | 'error', message: string) => void;
   /** 生成客户端；不传就用 config.llm 自建一个 OpenAI 兼容客户端 */
@@ -968,7 +968,7 @@ export class QqBridge {
     void (async () => {
       try {
         const system = [
-          this.deps.persona(),
+          this.deps.persona(groupId),
           '',
           `判断下面这条群消息，是不是在骂、嘲讽、阴阳怪气或辱骂群里的 AI「${this.config.selfName}」。`,
           '只输出 JSON：{"hostile":true|false,"severity":0|1|2,"why":"一句理由"}。',
@@ -1019,7 +1019,7 @@ export class QqBridge {
       const gateSpeaker = this.lastSpeaker.get(groupId) ?? '';
       const gateProfile = gateSpeaker === '' ? undefined : this.deps.profiles?.get(groupId, gateSpeaker);
       const system = [
-        this.deps.persona(),
+        this.deps.persona(groupId),
         '',
         `你是群里的「${this.config.selfName}」。现在不是让你回话，而是判断：这一波聊天，你要不要主动插一句？`,
         '只输出 JSON：{"speak":true|false,"why":"一句理由"}。',
@@ -1323,6 +1323,21 @@ export class QqBridge {
     for (const seg of segments.slice(0, 2)) {
       const url =
         typeof seg.data?.url === 'string' ? seg.data.url : typeof seg.data?.file === 'string' ? seg.data.file : '';
+      // NapCat 有时只给本地文件路径（尤其引用图片/缓存图），没有 http URL。
+      if (!/^https?:\/\//i.test(url) && !/^base64:\/\//i.test(url) && url !== '') {
+        try {
+          const local = url.startsWith('file://') ? decodeURIComponent(url.slice('file://'.length)) : url;
+          const bytes = readFileSync(local);
+          if (bytes.byteLength > 0 && bytes.byteLength <= 4 * 1024 * 1024) {
+            const ext = (local.split('.').pop() ?? 'jpg').toLowerCase();
+            const mediaType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+            images.push({ data: new Uint8Array(bytes), mediaType, name: `qq-local-${Date.now()}.${ext}` });
+          }
+        } catch {
+          /* 本地路径读不到就继续尝试其他来源 */
+        }
+        continue;
+      }
       if (/^base64:\/\//i.test(url)) {
         try {
           const bytes = Buffer.from(url.slice('base64://'.length), 'base64');
@@ -1596,7 +1611,7 @@ export class QqBridge {
       const viewImages = this.shouldViewImages(groupId, policy, message, mode);
       const chatImages = viewImages && message !== undefined ? await this.downloadChatImages(message) : [];
       const system = groupSystemPrompt({
-        persona: this.deps.persona(),
+        persona: this.deps.persona(groupId),
         selfName: this.config.selfName,
         mode,
         transcript: transcript(turns, this.config.selfName, now),
