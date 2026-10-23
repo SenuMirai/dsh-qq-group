@@ -256,6 +256,16 @@ export interface QqRvcConfig {
   indexPath: string;
   device: 'auto' | 'cpu' | 'dml' | 'cuda';
   pitch: number;
+  /** 特征检索比例 0~1 */
+  indexRate: number;
+  /** 保护清辅音 0~0.5 */
+  protect: number;
+  /** 音高滤波半径 0~7 */
+  filterRadius: number;
+  /** 响度包络混合 0~1 */
+  rmsMixRate: number;
+  /** 音高提取算法 */
+  f0Method: 'rmvpe' | 'pm';
   timeoutMs: number;
   maxSeconds: number;
 }
@@ -499,6 +509,11 @@ export function defaultConfig(): QqConfig {
       indexPath: '',
       device: 'auto',
       pitch: 0,
+      indexRate: 0.75,
+      protect: 0.33,
+      filterRadius: 3,
+      rmsMixRate: 0.5,
+      f0Method: 'rmvpe',
       timeoutMs: 120_000,
       maxSeconds: 45,
     },
@@ -865,6 +880,11 @@ export function normalizeConfig(raw: unknown): QqConfig {
       indexPath: str(rvcSrc.indexPath, 'rvc.indexPath', base.rvc.indexPath),
       device: enumOf(rvcSrc.device, 'rvc.device', base.rvc.device, ['auto', 'cpu', 'dml', 'cuda'] as const),
       pitch: num(rvcSrc.pitch, 'rvc.pitch', base.rvc.pitch, -24, 24),
+      indexRate: num(rvcSrc.indexRate, 'rvc.indexRate', base.rvc.indexRate, 0, 1),
+      protect: num(rvcSrc.protect, 'rvc.protect', base.rvc.protect, 0, 0.5),
+      filterRadius: num(rvcSrc.filterRadius, 'rvc.filterRadius', base.rvc.filterRadius, 0, 7),
+      rmsMixRate: num(rvcSrc.rmsMixRate, 'rvc.rmsMixRate', base.rvc.rmsMixRate, 0, 1),
+      f0Method: enumOf(rvcSrc.f0Method, 'rvc.f0Method', base.rvc.f0Method, ['rmvpe', 'pm'] as const),
       timeoutMs: num(rvcSrc.timeoutMs, 'rvc.timeoutMs', base.rvc.timeoutMs, 5_000, 600_000),
       maxSeconds: num(rvcSrc.maxSeconds, 'rvc.maxSeconds', base.rvc.maxSeconds, 1, 300),
     },

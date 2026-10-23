@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 1.10.1 — RVC 精细参数与试听按钮
+
+- RVC 新增可调参数：特征检索 indexRate、咬字保护 protect、音高平滑 filterRadius、响度混合 rmsMixRate、音高算法 rmvpe/pm。
+- CPU/ONNX worker 同步支持这些参数；ONNX 的 filterRadius 自动修正为奇数，避免 kernel_size 报错。
+- 试听按钮显式设置 type=button，避免在表单里点击触发页面刷新导致“毫无反应”。
+- 修正本地 TTS 网关挂掉时试听静默失败的问题（网关现需手动/开机启动）。
+
 ## 1.10.0 — 本地 TTS 后端列表
 
 - 语音页新增后端选择：Edge TTS / CosyVoice2 / IndexTTS-2.5。

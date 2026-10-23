@@ -20,6 +20,16 @@ export interface RvcWorkerConfig {
   indexPath: string;
   device: 'auto' | 'cpu' | 'dml' | 'cuda';
   pitch: number;
+  /** 特征检索比例 0~1：越高越像模型，太高可能金属感 */
+  indexRate: number;
+  /** 保护清辅音 0~0.5：越高越不容易咬字坏，但音色变化少 */
+  protect: number;
+  /** 音高滤波半径 0~7：越大越平滑 */
+  filterRadius: number;
+  /** 响度包络混合 0~1 */
+  rmsMixRate: number;
+  /** 音高提取算法 */
+  f0Method: 'rmvpe' | 'pm';
   timeoutMs: number;
   maxSeconds: number;
   /** 临时工作目录；默认系统临时目录（插件应传用户数据目录，避开沙箱限制） */
@@ -64,6 +74,11 @@ export function createCommandRvcConverter(config: RvcWorkerConfig): RvcConverter
           '--index', config.indexPath,
           '--device', config.device,
           '--pitch', String(Math.round(config.pitch)),
+          '--index-rate', String(config.indexRate),
+          '--protect', String(config.protect),
+          '--filter-radius', String(Math.round(config.filterRadius)),
+          '--rms-mix-rate', String(config.rmsMixRate),
+          '--f0-method', config.f0Method,
         ];
         const result = await runWorker(config.pythonPath || 'python', args, config.timeoutMs, options.signal);
         if (!result.ok) return result;
