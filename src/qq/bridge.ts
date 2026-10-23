@@ -872,6 +872,10 @@ export class QqBridge {
     // 明确要求发语音/唱歌：按直接对话处理
     const voiceRequest = asksForVoice(message.text);
     const singRequest = asksForSong(message.text);
+    // 引用别人的消息并让她看/总结：也按直接对话处理（引用自己的已有 repliedToSelf）
+    const quotedRequest =
+      message.replyToId !== undefined &&
+      /引用|上面|这个|看看|读|总结|分析|文件|记录|内容|说了什么/.test(message.text);
     // 画像：所有开启群里的发言都记；主人初始 +60，白名单 +20
     const userRules = this.deps.rules?.(userId);
     const initialAffinity =
@@ -881,14 +885,14 @@ export class QqBridge {
           ? userRules.initialWhitelistAffinity ?? 20
           : 0;
     this.deps.profiles?.touch(groupId, userId, name, {
-      mention: trigger === 'at' || trigger === 'call' || imageRequest || imageSendRequest || selfieRequest || voiceRequest || singRequest,
+      mention: trigger === 'at' || trigger === 'call' || imageRequest || imageSendRequest || selfieRequest || voiceRequest || singRequest || quotedRequest,
       initialAffinity,
     });
     // 引用回复她刚才那条消息 = 明确在跟她说话（比 @ 还准）
     const repliedToSelf =
       message.replyToId !== undefined && this.selfMessageIds.get(groupId)?.has(message.replyToId) === true;
     if (repliedToSelf) this.deps.profiles?.noteQuote(groupId, userId);
-    if (trigger === 'none' && !repliedToSelf && !imageRequest && !imageSendRequest && !selfieRequest && !voiceRequest && !singRequest) return;
+    if (trigger === 'none' && !repliedToSelf && !imageRequest && !imageSendRequest && !selfieRequest && !voiceRequest && !singRequest && !quotedRequest) return;
 
     // 让模型判断「这条是不是在怼她」，异步扣好感，不挡回复。
     // 只对直接对她说、或明显在聊她/DeepSeek 的消息跑，避免每条都多花一次调用。
@@ -902,7 +906,7 @@ export class QqBridge {
 
     // @ 与叫名字 / 引用她：立刻回（不受去抖窗口影响，但受冷却/限流约束）
     // 「叫名字」在提示词里与 @ 同一档：都是明确的「在跟你说话」
-    if (trigger === 'at' || trigger === 'call' || repliedToSelf || imageRequest || imageSendRequest || selfieRequest || voiceRequest || singRequest) {
+    if (trigger === 'at' || trigger === 'call' || repliedToSelf || imageRequest || imageSendRequest || selfieRequest || voiceRequest || singRequest || quotedRequest) {
       clearChatWindow(state);
       this.pendingTexts.delete(groupId);
       this.pendingAtOther.delete(groupId);
@@ -1252,7 +1256,7 @@ export class QqBridge {
   }
 
   /** 取被引用消息里的图片段（别人引用前面的图片时，当前消息本身没有图片） */
-  private async quotedImages(messageId: string): Promise<ObSegment[]> {
+  private async quotedSegments(messageId: string): Promise<ObSegment[]> {
     if (this.client === undefined) return [];
     try {
       const response = await this.client.call('get_msg', { message_id: Number(messageId) });
@@ -1264,14 +1268,54 @@ export class QqBridge {
         (seg): seg is ObSegment =>
           seg !== null &&
           typeof seg === 'object' &&
-          (seg as { type?: unknown }).type === 'image' &&
           (seg as { data?: unknown }).data !== null &&
           typeof (seg as { data?: unknown }).data === 'object',
       );
     } catch (e) {
-      this.log('debug', `读取被引用消息图片失败：${e instanceof Error ? e.message : String(e)}`);
+      this.log('debug', `读取被引用消息失败：${e instanceof Error ? e.message : String(e)}`);
       return [];
     }
+  }
+
+  private async quotedImages(messageId: string): Promise<ObSegment[]> {
+    const segments = await this.quotedSegments(messageId);
+    return segments.filter((seg) => seg.type === 'image');
+  }
+
+  /** 被引用消息的文字/文件/合并转发；图片另由 downloadChatImages 处理 */
+  private async readQuotedContext(
+    groupId: string,
+    policy: GroupPolicy,
+    message: GroupMessage | undefined,
+  ): Promise<string> {
+    if (message?.replyToId === undefined) return '';
+    const segments = await this.quotedSegments(message.replyToId);
+    if (segments.length === 0) return '';
+    const texts: string[] = [];
+    const files: ObSegment[] = [];
+    const forwards: ObSegment[] = [];
+    let images = 0;
+    let records = 0;
+    for (const seg of segments) {
+      if (seg.type === 'text' && typeof seg.data?.text === 'string') texts.push(seg.data.text);
+      else if (seg.type === 'image') images += 1;
+      else if (seg.type === 'file') files.push(seg);
+      else if (seg.type === 'forward') forwards.push(seg);
+      else if (seg.type === 'record') records += 1;
+    }
+    const parts: string[] = [];
+    if (texts.length > 0) parts.push(`【被引用的消息】${texts.join(' ')}`);
+    if (images > 0) parts.push(`【被引用消息含 ${images} 张图片】`);
+    if (records > 0) parts.push(`【被引用消息是 ${records} 条语音】`);
+    if (files.length > 0 && policy.fileReadMode !== 'off') {
+      const pseudo = { ...(message as GroupMessage), files } as GroupMessage;
+      parts.push(await this.readFileContext(groupId, policy, pseudo));
+    }
+    if (forwards.length > 0 && policy.forwardReadMode !== 'off') {
+      const pseudo = { ...(message as GroupMessage), forwards } as GroupMessage;
+      parts.push(await this.readForwardContext(policy, pseudo));
+    }
+    return parts.filter((part) => part.trim() !== '').join('\n');
   }
 
   /** 她正在生成时收到的直接对话：先排队，生成完立刻处理，绝不丢 */
@@ -1419,6 +1463,11 @@ export class QqBridge {
       const forwardNote = this.shouldReadForwards(groupId, policy, message, mode)
         ? await this.readForwardContext(policy, message)
         : '';
+      const quotedNote =
+        message?.replyToId !== undefined &&
+        (mode === 'at' || /引用|上面|这个|看看|读|总结|分析|文件|记录|内容|说了什么/.test(message.text))
+          ? await this.readQuotedContext(groupId, policy, message)
+          : '';
       // 按模型上下文预算裁剪最近消息；没有窗口信息时保持 contextTurns 默认行为
       try {
         const window = await this.deps.contextWindow?.();
@@ -1426,7 +1475,7 @@ export class QqBridge {
           const reserve = Math.min(4096, Math.floor(window * 0.25));
           const budget = Math.max(1000, window - reserve);
           const fixed =
-            estimateTokens(profileNote + summaryNote + keyMemoryNote + moodNote + fileNote + forwardNote + (message?.text ?? '')) +
+            estimateTokens(profileNote + summaryNote + keyMemoryNote + moodNote + fileNote + forwardNote + quotedNote + (message?.text ?? '')) +
             700;
           while (
             turns.length > 1 &&
@@ -1479,7 +1528,7 @@ export class QqBridge {
 
       const result = await this.llm.chat(
         [
-          { role: 'system', content: system + profileNote + summaryNote + keyMemoryNote + moodNote + fileNote + forwardNote },
+          { role: 'system', content: system + profileNote + summaryNote + keyMemoryNote + moodNote + fileNote + forwardNote + quotedNote },
           {
             role: 'user',
             content:
