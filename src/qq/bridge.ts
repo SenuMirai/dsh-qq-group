@@ -1491,7 +1491,14 @@ export class QqBridge {
     this.busy.add(groupId);
     try {
       const group = groupMemory(this.memory, groupId);
-      const turns = recentTurns(group, Math.max(1, policy.contextTurns || CONTEXT_TURNS));
+      const needsContext =
+        message !== undefined &&
+        /这|那|他|她|它|上面|刚才|前面|继续|还有|那个|这个|引用|之前|楼上|楼下|说的|上一条|刚刚/.test(message.text);
+      const contextLimit =
+        policy.contextMode === 'adaptive' && message !== undefined && !needsContext && message.text.length <= 60
+          ? Math.max(1, policy.adaptiveMinTurns || 4)
+          : Math.max(1, policy.contextTurns || CONTEXT_TURNS);
+      const turns = recentTurns(group, contextLimit);
       const speakerId = message?.userId ?? this.lastSpeaker.get(groupId) ?? '';
       const speakerProfile = speakerId === '' ? undefined : this.deps.profiles?.get(groupId, speakerId);
       const familiarity = speakerProfile === undefined ? 0 : Math.round(speakerProfile.familiarity);
@@ -2267,7 +2274,7 @@ export class QqBridge {
    */
   private async judgeMood(groupId: string, userText: string, replyText: string): Promise<void> {
     const policy = this.policyOf(groupId);
-    if (policy.moodEnabled === false || this.llm === undefined || this.moodJudging.has(groupId)) return;
+    if (policy.moodEnabled === false || policy.moodJudge === false || this.llm === undefined || this.moodJudging.has(groupId)) return;
     this.moodJudging.add(groupId);
     try {
       const mood = groupMood(

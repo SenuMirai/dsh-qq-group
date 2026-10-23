@@ -89,6 +89,12 @@ export interface GroupPolicy {
   maxDirectRepliesPer10Min: number;
   /** 每次带给模型的最近消息条数 */
   contextTurns: number;
+  /** 上下文策略：full=总是带 contextTurns；adaptive=自包含消息少带，指代/追问再带全量 */
+  contextMode: 'full' | 'adaptive';
+  /** adaptive 模式下，自包含消息最少带几条 */
+  adaptiveMinTurns: number;
+  /** 是否在直接回复后做情绪判断（多一次模型调用） */
+  moodJudge: boolean;
   /** 每群保留的原始消息上限 */
   memoryMaxTurns: number;
   /** 记忆 token 预算（估算） */
@@ -361,6 +367,9 @@ export function defaultGroupPolicy(): GroupPolicy {
     maxRepliesPer10Min: 6,
     maxDirectRepliesPer10Min: 20,
     contextTurns: 24,
+    contextMode: 'adaptive',
+    adaptiveMinTurns: 4,
+    moodJudge: true,
     memoryMaxTurns: 200,
     memoryMaxTokens: 12000,
     summaryMaxChars: 2000,
@@ -655,6 +664,11 @@ export function normalizeGroupPolicy(raw: unknown, path: string, base = defaultG
       1000,
     ),
     contextTurns: Math.round(num(src.contextTurns, `${path}.contextTurns`, base.contextTurns, 1, 100)),
+    contextMode: enumOf(src.contextMode, `${path}.contextMode`, base.contextMode, ['full', 'adaptive'] as const),
+    adaptiveMinTurns: Math.round(
+      num(src.adaptiveMinTurns, `${path}.adaptiveMinTurns`, base.adaptiveMinTurns, 1, 50),
+    ),
+    moodJudge: src.moodJudge === undefined ? base.moodJudge : src.moodJudge === true,
     memoryMaxTurns: Math.round(num(src.memoryMaxTurns, `${path}.memoryMaxTurns`, base.memoryMaxTurns, 20, 5000)),
     memoryMaxTokens: Math.round(num(src.memoryMaxTokens, `${path}.memoryMaxTokens`, base.memoryMaxTokens, 500, 200000)),
     summaryMaxChars: Math.round(num(src.summaryMaxChars, `${path}.summaryMaxChars`, base.summaryMaxChars, 200, 20000)),
