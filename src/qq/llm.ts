@@ -44,8 +44,10 @@ export interface ChatOptions {
   timeoutMs?: number;
   /** 要求返回 JSON（支持的模型才给；不支持的会自动退回普通模式重试一次） */
   json?: boolean;
-  /** 用途标签（用量统计：reply/gate/hostility/sticker/model-check/gen-test） */
+  /** 用途标签（用量统计：reply/gate/hostility/sticker/mood/memory/model-check/gen-test） */
   purpose?: string;
+  /** 产生这次调用的群（按群统计） */
+  groupId?: string;
   /** 附带图片（视觉模型会真正看到图；不支持图片的模型由适配器降级） */
   images?: ChatImage[];
 }

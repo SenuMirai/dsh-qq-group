@@ -584,6 +584,7 @@ export function apply(ctx: any): void {
       maxTokens?: number;
       timeoutMs?: number;
       purpose?: string;
+      groupId?: string;
       retry?: boolean;
       reasoningEffort?: string;
       modelOverride?: ModelRef;
@@ -684,6 +685,8 @@ export function apply(ctx: any): void {
           provider: active.provider,
           model: active.model,
           purpose: options.purpose ?? 'reply',
+          ...(options.groupId === undefined || options.groupId === '' ? {} : { groupId: options.groupId }),
+          ...(options.images === undefined || options.images.length === 0 ? {} : { images: options.images.length }),
           ...captured,
         });
       } catch {
@@ -696,6 +699,27 @@ export function apply(ctx: any): void {
       .map((b) => ('text' in b ? String((b as { text: unknown }).text) : ''))
       .join('')
       .trim();
+    if (captured === undefined) {
+      // 模型没有返回 usage 时，用字符数做保守估算，避免统计成 0。
+      const inputChars = system.length + user.length + history.reduce((sum, item) => sum + item.content.length, 0);
+      const inputTokens = Math.ceil(inputChars / 4) + (options.images?.length ?? 0) * 800;
+      try {
+        appendUsage(usagePath, {
+          ts: Date.now(),
+          provider: active.provider,
+          model: active.model,
+          purpose: options.purpose ?? 'reply',
+          ...(options.groupId === undefined || options.groupId === '' ? {} : { groupId: options.groupId }),
+          ...(options.images === undefined || options.images.length === 0 ? {} : { images: options.images.length }),
+          inputTokens,
+          outputTokens: Math.ceil(text.length / 4),
+          totalTokens: inputTokens + Math.ceil(text.length / 4),
+          estimated: true,
+        });
+      } catch {
+        /* 用量落盘失败不影响回复 */
+      }
+    }
     if (text === '') {
       const reasoningText = blocks
         .filter((b) => b.type === 'reasoning')
@@ -835,7 +859,13 @@ export function apply(ctx: any): void {
           '如果上下文完全看不出含义，就输出 {"tags":["未分类"],"description":"未分类"}。',
         ].join('\n');
         const user = [`发图的人：${context.sender}`, '最近聊天：', ...context.recent].join('\n');
-        const result = await generate(system, [], user, { purpose: 'sticker', timeoutMs: 20_000 });
+        const result = await generate(system, [], user, {
+          purpose: 'sticker',
+          timeoutMs: 20_000,
+          ...(typeof (context as { groupId?: unknown }).groupId === 'string'
+            ? { groupId: (context as { groupId: string }).groupId }
+            : {}),
+        });
         if (!result.ok) return undefined;
         try {
           const match = /\{[\s\S]*\}/.exec(result.text);
@@ -1021,6 +1051,25 @@ export function apply(ctx: any): void {
           model: list[0]?.model ?? '',
           ...summarize(list, settings.usageRates),
         }));
+        const groupMap = new Map<string, UsageEntry[]>();
+        for (const entry of monthEntries) {
+          const group = entry.groupId === undefined || entry.groupId === '' ? '(无群)' : entry.groupId;
+          const list = groupMap.get(group) ?? [];
+          list.push(entry);
+          groupMap.set(group, list);
+        }
+        const byGroup = [...groupMap.entries()]
+          .map(([groupId, list]) => ({ groupId, ...summarize(list, settings.usageRates) }))
+          .sort((a, b) => b.credits - a.credits);
+        const purposeMap = new Map<string, UsageEntry[]>();
+        for (const entry of monthEntries) {
+          const list = purposeMap.get(entry.purpose) ?? [];
+          list.push(entry);
+          purposeMap.set(entry.purpose, list);
+        }
+        const byPurpose = [...purposeMap.entries()]
+          .map(([purpose, list]) => ({ purpose, ...summarize(list, settings.usageRates) }))
+          .sort((a, b) => b.credits - a.credits);
         const key = usageKey(sel.provider, sel.model);
         let balance: Record<string, unknown> | null = null;
         if (settings.balance !== null) {
@@ -1040,6 +1089,8 @@ export function apply(ctx: any): void {
           totals,
           days,
           byModel,
+          byGroup,
+          byPurpose,
           balance,
           rates: settings.usageRates,
         });

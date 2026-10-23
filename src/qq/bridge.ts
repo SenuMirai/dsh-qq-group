@@ -980,7 +980,7 @@ export class QqBridge {
             { role: 'system', content: system },
             { role: 'user', content: `${message.name}：${message.text.slice(0, 500)}` },
           ],
-          { timeoutMs: 8_000, purpose: 'hostility' },
+          { timeoutMs: 8_000, purpose: 'hostility', groupId },
         );
         if (!result.ok) return;
         const match = /\{[\s\S]*\}/.exec(result.text);
@@ -1051,7 +1051,7 @@ export class QqBridge {
           { role: 'system', content: system },
           { role: 'user', content: user },
         ],
-        { timeoutMs: 20_000, purpose: 'gate' },
+        { timeoutMs: 20_000, purpose: 'gate', groupId },
       );
       if (!result.ok) {
         this.log('warn', `接话闸门模型失败（${result.message ?? result.reason}），按启发式继续`);
@@ -1662,7 +1662,7 @@ export class QqBridge {
         ],
         // 不再给 maxTokens：step-5 这类推理模型会先把 token 花在思考上，
         // 小上限会让它「只思考、不输出文本」，表现为「模型未返回文本」。
-        { timeoutMs: 90_000, purpose: 'reply', ...(chatImages.length > 0 ? { images: chatImages } : {}) },
+        { timeoutMs: 90_000, purpose: 'reply', groupId, ...(chatImages.length > 0 ? { images: chatImages } : {}) },
       );
       if (!result.ok) {
         this.recordError(`生成失败（${result.reason}）：${result.message}`);
@@ -2300,7 +2300,7 @@ export class QqBridge {
           { role: 'system', content: system },
           { role: 'user', content: user },
         ],
-        { json: true, timeoutMs: 20_000, purpose: 'mood' },
+        { json: true, timeoutMs: 20_000, purpose: 'mood', groupId },
       );
       if (!result.ok) return;
       const match = /\{[\s\S]*\}/.exec(result.text);
@@ -2367,7 +2367,7 @@ export class QqBridge {
           { role: 'system', content: system },
           { role: 'user', content: user },
         ],
-        { json: true, timeoutMs: 30_000, purpose: 'memory-v3' },
+        { json: true, timeoutMs: 30_000, purpose: 'memory-v3', groupId },
       );
       if (!result.ok) return;
       const match = /\{[\s\S]*\}/.exec(result.text);
@@ -2488,7 +2488,7 @@ export class QqBridge {
             { role: 'system', content: system },
             { role: 'user', content: text },
           ],
-          { json: true, timeoutMs: 45_000, purpose: 'memory' },
+          { json: true, timeoutMs: 45_000, purpose: 'memory', groupId },
         );
         if (result.ok) {
           const match = /\{[\s\S]*\}/.exec(result.text);

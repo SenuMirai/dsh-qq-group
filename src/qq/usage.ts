@@ -13,8 +13,14 @@ export interface UsageEntry {
   ts: number;
   provider: string;
   model: string;
-  /** reply / gate / hostility / model-check / gen-test */
+  /** reply / gate / hostility / sticker / mood / memory / memory-v3 / model-check / gen-test */
   purpose: string;
+  /** 产生这次调用的群；没有群上下文时为空 */
+  groupId?: string;
+  /** 附带图片数量（视觉调用单独看成本） */
+  images?: number;
+  /** usage chunk 缺失，按文本长度估算 */
+  estimated?: boolean;
   inputTokens: number;
   outputTokens: number;
   totalTokens?: number;
@@ -90,16 +96,30 @@ export interface UsageTotals {
   outputTokens: number;
   totalTokens: number;
   credits: number;
+  /** 没有拿到真实 usage、按字符估算的调用数 */
+  estimatedCalls: number;
+  /** 带图片的调用数 */
+  imageCalls: number;
 }
 
 export function summarize(entries: UsageEntry[], rates: Record<string, number>): UsageTotals {
-  const totals: UsageTotals = { calls: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0, credits: 0 };
+  const totals: UsageTotals = {
+    calls: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    credits: 0,
+    estimatedCalls: 0,
+    imageCalls: 0,
+  };
   for (const entry of entries) {
     totals.calls += 1;
     totals.inputTokens += entry.inputTokens;
     totals.outputTokens += entry.outputTokens;
     totals.totalTokens += entry.totalTokens ?? entry.inputTokens + entry.outputTokens;
     totals.credits += entryCredits(entry, rates);
+    if (entry.estimated === true) totals.estimatedCalls += 1;
+    if ((entry.images ?? 0) > 0) totals.imageCalls += 1;
   }
   return totals;
 }
