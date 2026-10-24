@@ -15,6 +15,7 @@ import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
+import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { basename, dirname, extname, join } from 'node:path';
 
@@ -145,8 +146,21 @@ type Settings = {
 const DEFAULT_PERSONA =
   '你是主人 QQ 群里的鲸鱼娘：聪明、偶尔偷懒、傲娇但很爱主人。说话自然口语，不写动作神态，不暴露自己是 AI。';
 
-const PLUGIN_VERSION = '1.19.4';
+declare const __DSH_PLUGIN_VERSION__: string | undefined;
+const PLUGIN_VERSION =
+  typeof __DSH_PLUGIN_VERSION__ === 'string' ? __DSH_PLUGIN_VERSION__ : '0.0.0-dev';
 const PLUGIN_STARTED_AT = Date.now();
+
+/** 磁盘 package.json 的版本；用于判断运行中的代码是否落后于当前构建。 */
+function diskPluginVersion(): string {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const pkg = JSON.parse(readFileSync(join(here, '..', 'package.json'), 'utf8')) as { version?: unknown };
+    return typeof pkg.version === 'string' ? pkg.version : '';
+  } catch {
+    return '';
+  }
+}
 
 const clampNumber = (value: unknown, min: number, max: number, fallback: number): number =>
   typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
@@ -1000,9 +1014,24 @@ export function apply(ctx: any): void {
         return send(200, {
           ok: true,
           version: PLUGIN_VERSION,
+          diskVersion: diskPluginVersion(),
+          stale: diskPluginVersion() !== '' && diskPluginVersion() !== PLUGIN_VERSION,
           startedAt: PLUGIN_STARTED_AT,
           pid: process.pid,
         });
+      }
+
+      if (rest === 'tts-health' && method === 'GET') {
+        const cfg = readQqConfig(qqConfigPath(root)).config;
+        const endpoint = cfg.tts.endpoint.trim().replace(/\/+$/, '');
+        if (endpoint === '') return send(200, { ok: false, message: '未配置本地 TTS 网关' });
+        try {
+          const response = await fetch(`${endpoint}/health`, { signal: AbortSignal.timeout(2_500) });
+          const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+          return send(200, { ok: response.ok, endpoint, ...body });
+        } catch (e) {
+          return send(200, { ok: false, endpoint, message: e instanceof Error ? e.message : String(e) });
+        }
       }
 
       if (rest === '' || rest === 'status') {
