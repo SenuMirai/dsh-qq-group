@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## 1.20.9 — 精简语音后端、日记滚动与保存置顶
+
+- 移除 RVC：UI 不再提供 RVC 设置，配置强制 `rvc.enabled=false`。
+- TTS 只保留 Edge TTS 与 GPT-SoVITS；CosyVoice2、Kokoro、IndexTTS 从 UI 和配置枚举中移除。
+- 音色列表按后端区分：Edge 显示晓伊系列，GPT-SoVITS 显示三月七/银狼。
+- 日记改为滚动查看：首屏 200 条，滚到底自动加载更早，另有「加载更早的日记」按钮；实测 1000 条可分页。
+- 所有模块的「保存全部」统一置顶为吸顶按钮，不再需要滚到页面底部。
+- 已实测保存接口：provider、serviceScript、人设卡、激活卡保存后均不丢失。
+
 ## 1.20.8 — 插件启动自动拉起语音网关
 
 - 新增 `tts.serviceScript`：点「启动」时若本地 TTS 网关离线，自动运行该脚本并等待最多 30 秒。

@@ -26,8 +26,8 @@ export interface SpeakOptions {
   rate?: string;
   pitch?: string;
   volume?: string;
-  /** edge = 内置；cosyvoice/indextts = 本地 HTTP 网关 */
-  provider?: 'edge' | 'cosyvoice' | 'kokoro' | 'gpt-sovits' | 'indextts';
+  /** edge = 内置；gpt-sovits = 本地 HTTP 网关 */
+  provider?: 'edge' | 'gpt-sovits';
   /** 本地 TTS 网关地址 */
   endpoint?: string;
   /** 情感/语气/风格描述（本地网关使用） */
