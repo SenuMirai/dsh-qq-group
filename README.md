@@ -1,5 +1,7 @@
 # dsh-qq-group
 
+> 当前版本：**v1.21.0**（QQ空间、七角色 GPT-SoVITS、日记滚动、保存置顶）
+
 独立的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) QQ 群聊插件：有人设、有记忆、会判断该不该接话，支持主动/被动搭话、语音、唱歌、表情包、日记、QQ空间说说和视觉看图。
 
 A standalone QQ group-chat plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): persona, memory, value-based reply decisions, proactive/passive chat, voice, singing, stickers, diary, QQ Zone posts and optional vision.
