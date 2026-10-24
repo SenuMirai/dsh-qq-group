@@ -179,6 +179,7 @@ async function synthesizeExternal(
   endpoint: string,
   text: string,
   style: string,
+  voice: string,
 ): Promise<TtsResult> {
   const base = endpoint.trim().replace(/\/+$/, '');
   if (base === '') return { ok: false, reason: 'error', message: '本地 TTS 网关地址为空' };
@@ -198,7 +199,7 @@ async function synthesizeExternal(
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ text, style }),
+      body: JSON.stringify({ text, style, voice }),
       signal: controller.signal,
     });
     clearTimeout(timer);
@@ -270,7 +271,7 @@ export class Speaker {
             pitch: options.pitch,
             volume: options.volume,
           })
-        : await synthesizeExternal(options.endpoint ?? '', trimmed, options.style ?? '');
+        : await synthesizeExternal(options.endpoint ?? '', trimmed, options.style ?? '', options.voice ?? '');
     if (!result.ok && provider !== 'edge') {
       // 本地 GPT-SoVITS/CosyVoice/Kokoro 网关没启动时，不能把整条语音吞掉。
       console.warn(`[dsh-qq-group] 本地 TTS 失败，回退 Edge：${result.message}`);

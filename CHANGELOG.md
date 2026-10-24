@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## 1.20.1 — 角色音色与试听修复
+
+- 修复 API 只加载 v2ProPlus 底模、不是角色权重的问题：tts_infer.yaml 现在直接指向三月七 GPT/SoVITS 权重。
+- 网关支持角色切换：三月七 / 银狼，按 voice 调用 set_gpt_weights / set_sovits_weights。
+- 音色列表新增「三月七 · v2ProPlus」「银狼 · v2ProPlus」。
+- 试听接口接受 style/voice 覆盖，选情绪/角色后试听立即生效。
+- 新增「GPT-SoVITS 情绪」下拉：开心/生气/吃惊/中立/难过/厌恶/恐惧。
+- 说明：试听仍回退 Edge，通常是因为 9880/50123 服务没启动；网关健康检查失败会回退。
+
 ## 1.20.0 — GPT-SoVITS v2ProPlus 与七情绪
 
 - 部署 v2ProPlus 底模：s1v3.ckpt、s2Gv2ProPlus.pth、声纹模型。

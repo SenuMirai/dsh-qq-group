@@ -191,7 +191,10 @@ const DEFAULT_SETTINGS: Settings = {
   ownerAffinity: 80,
   hostilityJudge: true,
   cookieWatch: true,
-  customVoices: [],
+  customVoices: [
+    { id: '三月七', label: '三月七 · v2ProPlus' },
+    { id: '银狼', label: '银狼 · v2ProPlus' },
+  ],
   usageRates: {},
   balance: null,
 };
@@ -318,21 +321,24 @@ function readSettings(root: string): Settings {
       ownerAffinity: clampNumber(raw.ownerAffinity, -100, 100, 80),
       hostilityJudge: raw.hostilityJudge !== false,
       cookieWatch: raw.cookieWatch !== false,
-      customVoices: Array.isArray(raw.customVoices)
-        ? raw.customVoices
-            .filter(
-              (v): v is { id: string; label: string } =>
-                v !== null &&
-                typeof v === 'object' &&
-                typeof (v as { id?: unknown }).id === 'string' &&
-                (v as { id: string }).id.trim() !== '',
-            )
-            .map((v) => ({
-              id: v.id.trim(),
-              label: typeof v.label === 'string' && v.label.trim() !== '' ? v.label.trim() : v.id.trim(),
-            }))
-            .slice(0, 200)
-        : [],
+      customVoices: (() => {
+        const list = Array.isArray(raw.customVoices)
+          ? raw.customVoices
+              .filter(
+                (v): v is { id: string; label: string } =>
+                  v !== null &&
+                  typeof v === 'object' &&
+                  typeof (v as { id?: unknown }).id === 'string' &&
+                  (v as { id: string }).id.trim() !== '',
+              )
+              .map((v) => ({
+                id: v.id.trim(),
+                label: typeof v.label === 'string' && v.label.trim() !== '' ? v.label.trim() : v.id.trim(),
+              }))
+              .slice(0, 200)
+          : [];
+        return list.length > 0 ? list : DEFAULT_SETTINGS.customVoices;
+      })(),
       usageRates:
         raw.usageRates !== null && typeof raw.usageRates === 'object' && !Array.isArray(raw.usageRates)
           ? Object.fromEntries(
@@ -1196,7 +1202,7 @@ export function apply(ctx: any): void {
       if (rest === 'voice-preview') {
         if (method !== 'POST') return send(405, { error: 'method not allowed' });
         const payload = (JSON.parse(body || 'null') as
-          | { text?: unknown; voice?: unknown; rate?: unknown; pitch?: unknown; volume?: unknown; rvc?: unknown; tts?: unknown }
+          | { text?: unknown; voice?: unknown; rate?: unknown; pitch?: unknown; volume?: unknown; style?: unknown; rvc?: unknown; tts?: unknown }
           | null) ?? {};
         const cfg = readQqConfig(qqConfigPath(root)).config;
         const ttsOverride =
@@ -1220,7 +1226,7 @@ export function apply(ctx: any): void {
           volume: typeof payload.volume === 'string' && payload.volume !== '' ? payload.volume : tts.volume,
           provider: tts.provider,
           endpoint: tts.endpoint,
-          style: tts.style,
+          style: typeof payload.style === 'string' && payload.style !== '' ? payload.style : tts.style,
         });
         if (!result.ok) return send(200, { ok: false, message: describeFailure(result) });
         let wav = encodeWave(result.pcm);
