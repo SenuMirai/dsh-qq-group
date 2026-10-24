@@ -236,6 +236,16 @@ export interface RuntimeStats {
  * 生命周期：`start()` → 连 NapCat、挂事件 → `stop()` 收尾。
  * 所有对外动作都从 `handleGroupMessage` / `handleOwnerMessage` 进来，**没有别的入口**。
  */
+/** 按回复文字粗分情绪，映射到 GPT-SoVITS 网关的参考音。 */
+function inferTtsStyle(text: string): string {
+  if (/大肥鱼|才不是|生气|滚|闭嘴|烦死|哼[！!]?$/.test(text)) return '生气';
+  if (/呜呜|难过|委屈|算了|走了|不想|哭/.test(text)) return '难过';
+  if (/啊？|什么|真的吗|居然|竟然|吃惊|吓一跳/.test(text)) return '吃惊';
+  if (/噫|嫌弃|恶心|好脏|呕/.test(text)) return '厌恶';
+  if (/怕|吓|恐怖|瘆得慌|不敢/.test(text)) return '恐惧';
+  return '开心';
+}
+
 export class QqBridge {
   private readonly deps: BridgeDeps;
   private config: QqConfig;
@@ -1997,7 +2007,7 @@ export class QqBridge {
       volume: tts.volume,
       provider: tts.provider,
       endpoint: tts.endpoint,
-      style: tts.style,
+      style: tts.style.trim() !== '' ? tts.style : inferTtsStyle(text),
     });
     if (!result.ok) {
       this.recordError(`语音合成失败：${describeFailure(result)}`);

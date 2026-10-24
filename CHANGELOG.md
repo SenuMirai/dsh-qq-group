@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## 1.20.0 — GPT-SoVITS v2ProPlus 与七情绪
+
+- 部署 v2ProPlus 底模：s1v3.ckpt、s2Gv2ProPlus.pth、声纹模型。
+- 部署三月七角色权重（GPT + SoVITS）。
+- 网关支持 7 种情绪参考音：开心/生气/吃惊/中立/难过/厌恶/恐惧；默认开心。
+- 插件按回复文字粗分情绪（大肥鱼/生气、呜呜/难过、吃惊、嫌弃、害怕），自动选 style；`tts.style` 手填时优先。
+- 补齐 onnxruntime CPU 依赖；实测 v2ProPlus 短句约 7.2 秒，32kHz。
+- 建议把 `voiceMaxChars` 从 80 降到 40~50，避免长语音等待过久。
+
 ## 1.19.8 — 语音不再引用
 
 - 修复语音/唱歌引用目标消息时，QQ 显示“该消息类型暂不支持查看”。
