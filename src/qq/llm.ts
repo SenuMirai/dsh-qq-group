@@ -199,6 +199,8 @@ export interface ReplyPlan {
   sticker?: string;
   /** 不发送的内心吐槽（写进「鲸鱼娘的日记」） */
   thought?: string;
+  /** 这条回复的情绪（用于 GPT-SoVITS 选参考音） */
+  emotion?: string;
 }
 
 export function parseReplyPlan(raw: string): ReplyPlan {
@@ -213,6 +215,7 @@ export function parseReplyPlan(raw: string): ReplyPlan {
         song?: unknown;
         sticker?: unknown;
         thought?: unknown;
+        emotion?: unknown;
       };
       const messages = Array.isArray(parsed.messages)
         ? parsed.messages.filter((m): m is string => typeof m === 'string').map((m) => m.trim()).filter((m) => m !== '')
@@ -224,12 +227,17 @@ export function parseReplyPlan(raw: string): ReplyPlan {
           typeof parsed.sticker === 'string' && parsed.sticker.trim() !== '' ? parsed.sticker.trim() : undefined;
         const thought =
           typeof parsed.thought === 'string' && parsed.thought.trim() !== '' ? parsed.thought.trim() : undefined;
+        const emotion =
+          typeof parsed.emotion === 'string' && /^(开心|生气|吃惊|中立|难过|厌恶|恐惧)$/.test(parsed.emotion.trim())
+            ? parsed.emotion.trim()
+            : undefined;
         return {
           messages,
           action,
           ...(song === undefined ? {} : { song }),
           ...(sticker === undefined ? {} : { sticker }),
           ...(thought === undefined ? {} : { thought }),
+          ...(emotion === undefined ? {} : { emotion }),
         };
       }
     } catch {
@@ -245,14 +253,20 @@ export function parseReplyPlan(raw: string): ReplyPlan {
       if (line === '' || /^```/.test(line)) return false;
       // 模型输出被截断时会退化成 JSON 片段；不要把片段当正文发出去。
       if (/^[{}[\],\s]*$/.test(line)) return false;
-      if (/^"(?:messages|action|song|sticker|thought)"\s*:/.test(line)) return false;
+      if (/^"(?:messages|action|song|sticker|thought|emotion)"\s*:/.test(line)) return false;
       if (/"messages"\s*:/.test(line) || /"action"\s*:/.test(line)) return false;
       return true;
     })
     .map((line) => line.replace(/^[`"'\s]+|[`"'\s]+$/g, '').trim())
     .filter((line) => line !== '' && !/^[{}[\],]+$/.test(line));
   const thought = extractJsonString(cleaned, 'thought');
-  return { messages: lines, action: 'text', ...(thought === undefined ? {} : { thought }) };
+  const emotion = parseEmotion(extractJsonString(cleaned, 'emotion'));
+  return {
+    messages: lines,
+    action: 'text',
+    ...(thought === undefined ? {} : { thought }),
+    ...(emotion === undefined ? {} : { emotion }),
+  };
 }
 
 /** 从被截断/半损坏的 JSON 里抢救 messages 数组和 action。 */
@@ -280,12 +294,20 @@ function salvagePlan(text: string): ReplyPlan | undefined {
   const action = actionMatch?.[1] === 'voice' || actionMatch?.[1] === 'sing' ? actionMatch[1] : 'text';
   const songMatch = /"song"\s*:\s*"((?:\\.|[^"\\])*)"/.exec(text);
   const thought = extractJsonString(text, 'thought');
+  const emotion = parseEmotion(extractJsonString(text, 'emotion'));
   return {
     messages,
     action,
     ...(songMatch === null ? {} : { song: songMatch[1] }),
     ...(thought === undefined ? {} : { thought }),
+    ...(emotion === undefined ? {} : { emotion }),
   };
+}
+
+function parseEmotion(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const text = value.trim();
+  return /^(开心|生气|吃惊|中立|难过|厌恶|恐惧)$/.test(text) ? text : undefined;
 }
 
 /** 从半损坏的 JSON 文本里抢救一个字符串字段（避免日记因 thought 丢失） */

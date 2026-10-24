@@ -1847,7 +1847,7 @@ export class QqBridge {
         message.hasVoice !== true
           ? message.messageId
           : undefined;
-      let sentCount = await this.deliver(groupId, policy, plan, now, mode, imageSendRequest, selfieRequest, undefined, quoteTarget);
+      let sentCount = await this.deliver(groupId, policy, plan, now, mode, imageSendRequest, selfieRequest, undefined, quoteTarget, plan.emotion);
       if (sentCount > 0) {
         const stat = this.statOf(groupId);
         stat.replied += sentCount;
@@ -1893,6 +1893,7 @@ export class QqBridge {
     selfieRequested = false,
     selfie?: SelfieInfo,
     quoteTo?: string,
+    emotion?: string,
   ): Promise<number> {
     const quoteSegment = quoteTo === undefined ? [] : [{ type: 'reply', data: { id: quoteTo } }];
     // 唱歌优先级最高：整段是一条语音，不用连发
@@ -1911,7 +1912,7 @@ export class QqBridge {
       (policy.voiceChance > 0 || policy.requestedVoiceChance > 0 || mode === 'proactive')
     ) {
       const text = plan.messages.join('，');
-      const voiceOk = await this.speakInGroup(groupId, text);
+      const voiceOk = await this.speakInGroup(groupId, text, undefined, emotion);
       if (voiceOk) {
         this.appendAssistant(groupId, text, now);
         return 1;
@@ -1997,7 +1998,7 @@ export class QqBridge {
   }
 
   /** 在群里说一段话（语音） */
-  private async speakInGroup(groupId: string, text: string, quoteTo?: string): Promise<boolean> {
+  private async speakInGroup(groupId: string, text: string, quoteTo?: string, emotion?: string): Promise<boolean> {
     const speaker = this.speaker;
     if (speaker === undefined) return false;
     const tts = this.config.tts;
@@ -2008,7 +2009,7 @@ export class QqBridge {
       volume: tts.volume,
       provider: tts.provider,
       endpoint: tts.endpoint,
-      style: tts.style.trim() !== '' ? tts.style : inferTtsStyle(text),
+      style: tts.style.trim() !== '' ? tts.style : emotion !== undefined && emotion !== '' ? emotion : inferTtsStyle(text),
     });
     if (!result.ok) {
       this.recordError(`语音合成失败：${describeFailure(result)}`);
