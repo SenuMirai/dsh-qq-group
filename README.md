@@ -1,8 +1,8 @@
 # dsh-qq-group
 
-独立的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) QQ 群聊插件：有人设、有记忆、会判断该不该接话，支持主动/被动搭话、语音、唱歌、表情包、日记和视觉看图。
+独立的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) QQ 群聊插件：有人设、有记忆、会判断该不该接话，支持主动/被动搭话、语音、唱歌、表情包、日记、QQ空间说说和视觉看图。
 
-A standalone QQ group-chat plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): persona, memory, value-based reply decisions, proactive/passive chat, voice, singing, stickers, diary and optional vision.
+A standalone QQ group-chat plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): persona, memory, value-based reply decisions, proactive/passive chat, voice, singing, stickers, diary, QQ Zone posts and optional vision.
 
 > 本项目从 [dsh-whale-girl](https://github.com/SenuMirai/dsh-whale-girl) 的 QQ 模块拆分而来，数据、模型、人设与桌宠完全独立。
 > This project was split out of the QQ module in [dsh-whale-girl](https://github.com/SenuMirai/dsh-whale-girl); its data, model, persona and lifecycle are fully independent from the desktop pet.
@@ -23,10 +23,11 @@ A standalone QQ group-chat plugin for [DeepSeek Harness](https://github.com/deep
 | **直接对话队列** | 她正在生成时收到的 @/引用会排队，不会丢；主动开口会给 @ 让位 |
 | **群友画像** | 每群每人独立熟识度/好感度；主人数值全局统一且可编辑，不被互动或衰减改动 |
 | **群聊开关** | 设置页顶部逐群开关；关闭后完全不接该群消息、不主动开口、不写互动 |
-| **日记** | 每条回复记录上下文、评分理由、内心吐槽；thought 放在 JSON 第一项；支持筛选、导出、删除单条/按人删除 |
+| **日记** | 每条回复记录上下文、评分理由、内心吐槽；thought 放在 JSON 第一项；支持筛选、导出、删除单条/按人删除；列表可滚动加载全部，不再只看最近几十条 |
 | **表情包** | 自动收藏、AI 打标签、按语境/关键词选图；自拍图已并入常用库，用“尾巴/自拍”标签即可被明确请求选中 |
-| **语音 / 唱歌** | Edge / CosyVoice2 / Kokoro / GPT-SoVITS 多后端切换；GPT-SoVITS 已接 v2ProPlus 与 7 种情绪参考音，RVC 变声、语气预设、试听、按群概率 |
+| **语音 / 唱歌** | 只保留 Edge TTS 与 GPT-SoVITS；GPT-SoVITS 已接 v2ProPlus 七角色（三月七、银狼、藿藿、白露、虎克、青雀、克拉拉）与 7 种情绪参考音；支持试听、按群概率；RVC 已移除 |
 | **七情绪** | 开心 / 生气 / 吃惊 / 中立 / 难过 / 厌恶 / 恐惧；按回复文字自动选参考音，也可手动指定 style |
+| **QQ空间** | 新页签：手动 / 草稿 / 自动三种模式；可见范围默认仅自己；每日上限、最小间隔、自动概率；用今天日记生成草稿；发布前清洗链接与 QQ 号/群号；本地记录可删除 |
 | **视觉看图** | 可看当前/引用图片，也支持转发聊天记录里的图片；嵌套转发最多展开两层；本地路径与文件头识别 |
 | **回复引用** | 目标消息被后续消息隔开时自动带 QQ 引用，可开关；文件/合并转发/语音不引用，失败自动改发纯文字 |
 | **省 token** | 自适应上下文（自包含短句少读、指代/追问读全量）、contextTurns、记忆注入条数、情绪/敌意判断开关 |
@@ -134,9 +135,12 @@ DSH 设置 →「QQ 群聊」→「连接」：
 - **聊天频率（按群）**：阈值、关键词/成员概率、冷却、上限、连发、语音/唱歌/表情包概率、看图策略；
 - **白名单 / 黑名单**：一行一个 QQ；白名单抬评分下限，黑名单压上限；
 - **夜间**：时段与命中扣分；
-- **语音**：音色、语速、音调、音量、语气预设、试听；
+- **语音**：Edge / GPT-SoVITS、音色、情绪、语速、试听、网关检查；
+- **QQ空间**：启用、模式、可见范围、频率、草稿生成与发布；
 - **表情包**：自动收藏、数量/MB 上限、看图策略；
-- **日记**：筛选、导出、删除。
+- **日记**：筛选、导出、删除、滚动加载全部。
+
+所有页签的「保存全部」固定在顶部，不需要滚到底部。
 
 ### 数据与隐私
 
@@ -147,6 +151,7 @@ DSH 设置 →「QQ 群聊」→「连接」：
 | `$DSH_HOME/dsh-qq-group/qq-memory.json` | 每群记忆（上限 200 条/群） |
 | `$DSH_HOME/dsh-qq-group/profiles.json` | 每群每人画像 |
 | `$DSH_HOME/dsh-qq-group/diary.json` | 日记（上限 1000 条） |
+| `$DSH_HOME/dsh-qq-group/qzone.json` | QQ空间发布记录（tid、正文、时间、可见范围） |
 | `$DSH_HOME/dsh-qq-group/stickers/` | 本地表情包 |
 
 仓库**不包含**任何聊天记忆、日记、QQ 号、token、Cookie 或用户路径；这些只存在于本机运行时。`.gitignore` 已排除数据文件。
@@ -230,6 +235,16 @@ DSH 设置 →「QQ 群聊」→「连接」：
 
 
 
+
+### v1.21.0 QQ空间与七角色语音
+
+- 新增「QQ空间」页签：手动 / 草稿 / 自动三种模式。
+- 可见范围默认「仅自己可见」，可选好友/所有人。
+- 每日上限、最小间隔、自动概率；用今天日记生成草稿。
+- 发布前清洗链接、QQ号/群号；本地记录支持删除。
+- GPT-SoVITS 新增藿藿、白露、虎克、青雀、克拉拉，共 7 个 v2ProPlus 角色。
+- 语音只保留 Edge TTS 与 GPT-SoVITS；RVC、CosyVoice2、Kokoro、IndexTTS 已移除。
+- 日记支持滚动加载全部；所有页签「保存全部」置顶。
 
 ### v1.20.0 GPT-SoVITS v2ProPlus 与七情绪
 
@@ -426,7 +441,8 @@ MIT，© 2026 SenuMirai。见 [LICENSE](./LICENSE)。
 | **Member profiles** | Per-group, per-user familiarity 0–100 and affinity -100–+100, updated by speech, mentions, replies, continuity and hostility |
 | **Diary** | Every reply records context, score reasons and inner thought; `thought` is the first JSON field; filter, export, delete one/person |
 | **Stickers** | Auto-collect group images, AI rename/tag, context-aware sending; count and disk caps |
-| **Voice / singing** | Edge / CosyVoice2 / Kokoro / GPT-SoVITS backends, RVC conversion, tone presets, preview, per-group probability; offline singing and built-in scores |
+| **Voice / singing** | Edge TTS and GPT-SoVITS only; GPT-SoVITS ships 7 v2ProPlus characters (March 7th, Silver Wolf, Huohuo, Bailu, Hook, Qingque, Clara) with 7 emotion references; preview and per-group probability; RVC removed |
+| **QQ Zone** | New tab: manual / draft / auto modes; visibility defaults to private; daily cap, minimum interval, auto chance; draft from today’s diary; strips links and QQ/group numbers before publishing; local history with delete |
 | **Vision** | Optionally pass real QQ images to a vision model: @ / strong context / opinion questions; local paths and magic-byte detection supported |
 | **Reply quoting** | Auto-quote when the target is separated by newer messages; toggleable; files/forwards/voice are skipped and failed quotes retry as plain text |
 | **Token saving** | Adaptive context (fewer turns for self-contained messages, full context for references), contextTurns, memory injection count, mood/hostility toggles |
@@ -636,6 +652,16 @@ Each project keeps its own license; this project borrows design ideas only and d
 - The gateway translates POST /tts into GPT-SoVITS GET /tts and returns WAV.
 - v1 base model on CPU: short sentence about 2.4s; character model not trained yet.
 - Reference audio is a locally generated female voice; replaceable with the trained character model later.
+
+### v1.21.0 QQ Zone and seven-character voice
+
+- New QQ Zone tab: manual / draft / auto modes.
+- Visibility defaults to private; friends or public optional.
+- Daily cap, minimum interval and auto chance; draft from today's diary.
+- Strips links and QQ/group numbers before publishing; local history with delete.
+- GPT-SoVITS adds Huohuo, Bailu, Hook, Qingque and Clara, for 7 v2ProPlus characters.
+- Voice keeps only Edge TTS and GPT-SoVITS; RVC, CosyVoice2, Kokoro and IndexTTS removed.
+- Diary loads all entries on scroll; Save All is pinned to the top of every tab.
 
 ### v1.11.0 Kokoro GPU TTS
 
