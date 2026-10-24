@@ -998,6 +998,7 @@ export class QqBridge {
         if (parsed.hostile !== true) return;
         const severity = parsed.severity === 2 ? 2 : 1;
         this.deps.profiles?.noteHostility(groupId, message.userId, severity);
+        this.adjustMood(groupId, -severity * 3, severity === 2 ? '被明确辱骂，心情变差' : '被阴阳嘲讽，有点不爽');
         this.log(
           'info',
           `群 ${groupId} 判定 ${message.name} 在怼她（好感 -${severity === 2 ? 4 : 2}）：${typeof parsed.why === 'string' ? parsed.why : ''}`,
@@ -2247,8 +2248,12 @@ export class QqBridge {
         }
       }
       // 冷场 → 主动开口：先收集候选，这一轮最多挑一个群
-      const verdict = proactiveVerdict(state, policy, now, { busy: this.busy.has(groupId) });
-      if (verdict.fire) proactiveCandidates.push({ groupId, policy, state });
+      // 夜间免打扰：不主动开口（普通接话仍由夜间扣分控制）
+      const nightNow = this.deps.rules?.('')?.night === true;
+      if (!nightNow) {
+        const verdict = proactiveVerdict(state, policy, now, { busy: this.busy.has(groupId) });
+        if (verdict.fire) proactiveCandidates.push({ groupId, policy, state });
+      }
     }
     if (proactiveCandidates.length > 0 && !this.muted) {
       const picked = proactiveCandidates[Math.floor(Math.random() * proactiveCandidates.length)]!;
@@ -2315,6 +2320,23 @@ export class QqBridge {
   /** 群策略（显式配置优先） */
   private policyOf(groupId: string): GroupPolicy {
     return policyFor(this.config, groupId);
+  }
+
+  private adjustMood(groupId: string, delta: number, reason: string): void {
+    const policy = this.policyOf(groupId);
+    const mood = groupMood(
+      this.moods,
+      groupId,
+      { baseline: policy.moodBaseline, floor: policy.moodFloor, halfLifeHours: policy.moodHalfLifeHours },
+      Date.now(),
+    );
+    decayMood(mood, Date.now(), {
+      baseline: policy.moodBaseline,
+      floor: policy.moodFloor,
+      halfLifeHours: policy.moodHalfLifeHours,
+    });
+    applyMoodJudgement(mood, { moodDelta: delta, dims: {}, reason, confidence: 85 }, Date.now());
+    this.persistMood();
   }
 
   /** 记忆落盘（失败只记日志，不影响对话） */
@@ -2424,7 +2446,8 @@ export class QqBridge {
         '只输出 JSON，不要解释：',
         '{"moodDelta":0,"dims":{"happy":0,"calm":0,"sweet":0,"heartache":0,"worry":0,"sad":0,"jealous":0},"reason":"","confidence":80}',
         'moodDelta 范围 -10~+10，大多数时候 -4~+4；dims 每根 -10~+10。',
-        '心情下降只能因为心疼对方、担心对方，或你自己难过；绝不能因为对方惹你生气就降。',
+        '心情可以下降：被辱骂、被恶意攻击、被反复冒犯时会明显下降；心疼/担心也会下降。',
+        '普通玩笑、技术反驳、不同意见不要下降。',
         'reason 用一句过去式中文，写“对方做了什么，我当时怎么应”，不要写“此刻/现在/一直”。',
         'confidence 0~100：事情清楚才给 80~95，只能凭语气猜给 40~70，没把握就低。',
         '不要编造对方没说的细节；没有明显变化就全 0。',

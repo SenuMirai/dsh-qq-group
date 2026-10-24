@@ -132,6 +132,14 @@ export function listSelfies(root: string): SelfieInfo[] {
   const state = readState(root);
   adoptOrphans(root, state);
   const dir = selfieDir(root);
+  let changed = false;
+  for (const file of Object.keys(state.items)) {
+    if (!existsSync(join(dir, file))) {
+      delete state.items[file];
+      changed = true;
+    }
+  }
+  if (changed) writeState(root, state);
   return Object.values(state.items)
     .filter((item) => existsSync(join(dir, item.file)))
     .map(({ file, tags, description, addedAt, bytes, used }) => ({ file, tags, description, addedAt, ...(bytes === undefined ? {} : { bytes }), ...(used === undefined ? {} : { used }) }))
