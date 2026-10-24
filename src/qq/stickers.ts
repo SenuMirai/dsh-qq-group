@@ -693,7 +693,26 @@ export function createStickerHub(root: string, options: StickerHubOptions): Stic
       }
       const pool = candidates.filter((entry) => entry.repo.id === chosen.id);
       const preferredEntry = preferred === undefined ? undefined : pool.find((entry) => entry.item.file === basename(preferred));
-      const pick = preferredEntry ?? pool[Math.floor(Math.random() * pool.length)]!;
+      const words =
+        preferred === undefined
+          ? []
+          : preferred
+              .toLowerCase()
+              .split(/[\s,，、]+/)
+              .map((word) => word.trim())
+              .filter((word) => word !== '' && word.length <= 12);
+      const keywordMatched =
+        words.length === 0
+          ? []
+          : pool.filter((entry) => {
+              const hay = `${entry.item.file} ${entry.item.tags.join(' ')} ${entry.item.description}`.toLowerCase();
+              return words.some((word) => hay.includes(word));
+            });
+      const pick =
+        preferredEntry ??
+        (keywordMatched.length > 0
+          ? keywordMatched[Math.floor(Math.random() * keywordMatched.length)]!
+          : pool[Math.floor(Math.random() * pool.length)]!);
       const path = existingPath(root, pick.item);
       if (path === undefined) return undefined;
       if (lastSelected !== undefined && pool.length > 1 && pick.item.file === lastSelected) {

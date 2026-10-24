@@ -1,6 +1,6 @@
 /**
- * 合并转发读取：OneBot get_forward_msg → 紧凑文本。
- * 只展开一层；嵌套转发显示占位，避免递归和 token 爆炸。
+ * 合并转发读取：OneBot get_forward_msg → 紧凑文本 + 图片段。
+ * 支持两层嵌套；嵌套转发只展开一层，避免递归和 token 爆炸。
  */
 import type { OneBotClient } from './onebot';
 import type { ObSegment } from './types';
@@ -9,9 +9,10 @@ export interface ForwardResult {
   text: string;
   nodes: number;
   truncated: boolean;
+  images: ObSegment[];
 }
 
-function nodeText(message: unknown): string {
+function nodeText(message: unknown, images: ObSegment[]): string {
   if (typeof message === 'string') return message.replace(/\[CQ:[^\]]*\]/g, '').trim();
   if (!Array.isArray(message)) return '';
   const parts: string[] = [];
@@ -25,7 +26,8 @@ function nodeText(message: unknown): string {
         parts.push(`@${typeof seg.data.qq === 'string' ? seg.data.qq : ''} `);
         break;
       case 'image':
-        parts.push('[图片]');
+        images.push(seg);
+        parts.push(`[图片${images.length}]`);
         break;
       case 'file':
         parts.push(`[文件${typeof seg.data.name === 'string' ? `：${seg.data.name}` : ''}]`);
@@ -51,6 +53,7 @@ export async function readForward(
   seg: ObSegment,
   maxNodes: number,
   maxChars: number,
+  depth = 0,
 ): Promise<ForwardResult> {
   const rawId = seg.data?.id ?? seg.data?.forward_id;
   const id = typeof rawId === 'string' ? rawId : typeof rawId === 'number' ? String(rawId) : '';
@@ -68,6 +71,7 @@ export async function readForward(
         ? data!.message
         : [];
   const lines: string[] = [];
+  const images: ObSegment[] = [];
   let chars = 0;
   let truncated = false;
   let count = 0;
@@ -84,7 +88,21 @@ export async function readForward(
     };
     const nameRaw = node.sender?.card ?? node.sender?.nickname ?? node.sender?.user_id ?? '群友';
     const name = typeof nameRaw === 'string' && nameRaw.trim() !== '' ? nameRaw.trim().slice(0, 30) : '群友';
-    const body = nodeText(node.message ?? node.content);
+    const rawMessage = node.message ?? node.content;
+    let body = nodeText(rawMessage, images);
+    // 嵌套转发：只再展开一层
+    if (depth < 2 && Array.isArray(rawMessage)) {
+      for (const child of rawMessage as ObSegment[]) {
+        if (child?.type !== 'forward') continue;
+        try {
+          const nested = await readForward(client, child, maxNodes, maxChars, depth + 1);
+          body += `\n  [嵌套转发：${nested.nodes} 条] ${nested.text}`;
+          images.push(...nested.images);
+        } catch {
+          body += '\n  [嵌套转发读取失败]';
+        }
+      }
+    }
     if (body === '') continue;
     const line = `${name}：${body.replace(/\s+/g, ' ').trim()}`;
     if (chars + line.length + 1 > maxChars) {
@@ -96,5 +114,5 @@ export async function readForward(
     count += 1;
   }
   if (lines.length === 0) throw new Error('转发记录为空');
-  return { text: lines.join('\n'), nodes: count, truncated };
+  return { text: lines.join('\n'), nodes: count, truncated, images };
 }

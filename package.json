@@ -1,6 +1,6 @@
 {
   "name": "dsh-qq-group",
-  "version": "1.19.6",
+  "version": "1.19.7",
   "description": "独立的 DSH QQ 群聊插件：人设、主动/被动搭话、DSH 模型选择；与桌宠数据/记忆完全分开",
   "type": "module",
   "main": "lib/index.js",
