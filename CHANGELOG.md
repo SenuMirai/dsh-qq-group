@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 1.20.8 — 插件启动自动拉起语音网关
+
+- 新增 `tts.serviceScript`：点「启动」时若本地 TTS 网关离线，自动运行该脚本并等待最多 30 秒。
+- 语音页新增「服务启动脚本」输入框。
+- 本机已配置为 `C:\DSHwork\models\tts\start-tts-all.bat`。
+- 启动结果会随 `/start` 返回 `tts.ok/launched/message`，不再依赖外部看门狗。
+- 看门狗仍保留作为兜底。
+
 ## 1.20.7 — 明确语音强制与看门狗锁修复
 
 - 明确说“发语音/说句话”时，直接强制 `action=voice`，不再依赖模型是否选择 voice。

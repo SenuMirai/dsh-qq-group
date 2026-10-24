@@ -233,6 +233,8 @@ export interface QqTtsConfig {
   pythonPath: string;
   /** 语音缓存目录（空 = 用户目录下的 cache/tts） */
   cacheDir: string;
+  /** 插件启动时用来拉起本地 TTS 服务的脚本（.bat/.ps1；空 = 不自动拉起） */
+  serviceScript: string;
 }
 
 /** 唱歌后端名：pitch = A 档（TTS 声线 + 重采样），diffsinger / rvc = 预留 */
@@ -513,6 +515,7 @@ export function defaultConfig(): QqConfig {
       style: '',
       pythonPath: '',
       cacheDir: '',
+      serviceScript: '',
     },
     sing: {
       backend: 'pitch',
@@ -897,6 +900,7 @@ export function normalizeConfig(raw: unknown): QqConfig {
       style: str(ttsSrc.style, 'tts.style', base.tts.style),
       pythonPath: str(ttsSrc.pythonPath, 'tts.pythonPath', base.tts.pythonPath),
       cacheDir: str(ttsSrc.cacheDir, 'tts.cacheDir', base.tts.cacheDir),
+    serviceScript: str(ttsSrc.serviceScript, 'tts.serviceScript', base.tts.serviceScript),
     },
     sing: {
       backend: enumOf(singSrc.backend, 'sing.backend', base.sing.backend, ['pitch', 'diffsinger', 'rvc'] as const),

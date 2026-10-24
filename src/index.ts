@@ -892,6 +892,42 @@ export function apply(ctx: any): void {
     };
   };
 
+  /** 启动插件时确保本地 TTS 网关在线；失败不阻塞聊天，只返回提示。 */
+  const ensureTtsGateway = async (): Promise<{ ok: boolean; launched: boolean; message: string }> => {
+    const tts = readQqConfig(qqConfigPath(root)).config.tts;
+    if (tts.provider === 'edge') return { ok: true, launched: false, message: 'Edge 不需要本地服务' };
+    const endpoint = tts.endpoint.trim().replace(/\/+$/, '');
+    if (!/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(endpoint)) {
+      return { ok: true, launched: false, message: '非本地网关，跳过自动启动' };
+    }
+    const probe = async (): Promise<boolean> => {
+      try {
+        const response = await fetch(`${endpoint}/health`, { signal: AbortSignal.timeout(2_000) });
+        return response.ok;
+      } catch {
+        return false;
+      }
+    };
+    if (await probe()) return { ok: true, launched: false, message: '本地 TTS 网关已在线' };
+    if (tts.serviceScript.trim() === '') {
+      return { ok: false, launched: false, message: '本地 TTS 网关离线，且未配置启动脚本' };
+    }
+    try {
+      spawn('cmd.exe', ['/c', tts.serviceScript], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+      }).unref();
+    } catch (e) {
+      return { ok: false, launched: false, message: `启动脚本失败：${e instanceof Error ? e.message : String(e)}` };
+    }
+    for (let i = 0; i < 15; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      if (await probe()) return { ok: true, launched: true, message: '已自动拉起本地 TTS 网关' };
+    }
+    return { ok: false, launched: true, message: '已执行启动脚本，但 30 秒内网关仍未就绪' };
+  };
+
   const qqHost = createQqHost({
     userRoot: root,
     persona: (groupId?: string) => activePersona(readSettings(root), groupId),
@@ -1877,8 +1913,9 @@ export function apply(ctx: any): void {
         const config = readQqConfig(qqConfigPath(root)).config;
         const applied = applyMode(config, readSettings(root).mode);
         writeFileSync(qqConfigPath(root), `${JSON.stringify(applied, null, 2)}\n`, 'utf8');
+        const tts = await ensureTtsGateway();
         const started = (await qqHost.handle('qq/start', 'POST')) as Record<string, unknown>;
-        return send(200, { ...started, napcat });
+        return send(200, { ...started, napcat, tts });
       }
       if (rest === 'stop') return send(200, await qqHost.handle('qq/stop', 'POST'));
       if (rest === 'say') return send(200, await qqHost.handle('qq/say', 'POST', body));
