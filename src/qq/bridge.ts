@@ -890,6 +890,7 @@ export class QqBridge {
     const imageSendRequest = rawImageSendRequest && !selfieRequest;
     // 明确要求发语音/唱歌：按直接对话处理
     const voiceRequest = asksForVoice(message.text);
+    if (voiceRequest) this.log('info', `群 ${groupId} 识别到语音请求：${message.text.slice(0, 80)}`);
     const singRequest = asksForSong(message.text);
     // 引用别人的消息并让她看/总结：也按直接对话处理（引用自己的已有 repliedToSelf）
     const quotedRequest =
@@ -1778,6 +1779,11 @@ export class QqBridge {
       if ((imageSendRequest || selfieRequest) && !singRequest && plan.action !== 'text') plan = { ...plan, action: 'text' };
       // 明确要语音时，不要被模型自作主张选成唱歌
       if (voiceRequest && !singRequest && plan.action === 'sing') plan = { ...plan, action: 'text' };
+      // 明确要语音：直接强制 voice，不再依赖模型是否选了 voice。
+      if (voiceRequest && policy.requestedVoiceChance > 0) {
+        plan = { ...plan, action: 'voice' };
+        this.log('info', `群 ${groupId} 语音请求强制走 voice（requestedVoiceChance=${policy.requestedVoiceChance}）`);
+      }
       // 语音概率独立掷骰：不再等模型“选 voice”。
       // 被明确要求发语音时用 requestedVoiceChance；否则用普通 voiceChance。
       const spokenText = plan.messages.join('，');
@@ -1800,6 +1806,9 @@ export class QqBridge {
             : policy.voiceChance;
         const action = chooseVoiceAction(plan.action === 'voice' ? 'voice' : 'text', true, chance, Math.random());
         if (action !== plan.action) plan = { ...plan, action };
+      }
+      if (voiceRequest) {
+        this.log('info', `群 ${groupId} 语音请求结果：eligible=${voiceEligible} action=${plan.action} len=${spokenText.length}`);
       }
       if (plan.messages.length === 0) {
         this.recordError('模型没有产出可发送的消息（回复为空）');
