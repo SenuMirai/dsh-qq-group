@@ -1886,7 +1886,7 @@ export class QqBridge {
     const quoteSegment = quoteTo === undefined ? [] : [{ type: 'reply', data: { id: quoteTo } }];
     // 唱歌优先级最高：整段是一条语音，不用连发
     if (plan.action === 'sing' && policy.singOnRequest) {
-      const sung = await this.singInGroup(groupId, plan.song, quoteTo);
+      const sung = await this.singInGroup(groupId, plan.song);
       if (sung.ok) {
         this.appendAssistant(groupId, `（唱了一首：${plan.song ?? '即兴'}）`, now);
         return 1;
@@ -1900,7 +1900,7 @@ export class QqBridge {
       (policy.voiceChance > 0 || policy.requestedVoiceChance > 0 || mode === 'proactive')
     ) {
       const text = plan.messages.join('，');
-      const voiceOk = await this.speakInGroup(groupId, text, quoteTo);
+      const voiceOk = await this.speakInGroup(groupId, text);
       if (voiceOk) {
         this.appendAssistant(groupId, text, now);
         return 1;
