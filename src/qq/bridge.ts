@@ -314,6 +314,46 @@ export class QqBridge {
 
   /** 当前状态快照（面板/HTTP 接口用；不含任何聊天内容） */
   /** 记忆面板：当前群的条数、摘要、关键记忆与预算 */
+  /** QQ空间：当前连接是否可用 */
+  qzoneAvailable(): boolean {
+    return this.client !== undefined;
+  }
+
+  /** QQ空间：发表说说（NapCat 扩展接口 send_qzone_msg） */
+  async qzonePublish(
+    content: string,
+    ugcRight: number,
+  ): Promise<{ ok: boolean; tid?: string; message?: string }> {
+    if (this.client === undefined) return { ok: false, message: 'QQ 连接未建立' };
+    const text = content.trim();
+    if (text === '') return { ok: false, message: '说说正文为空' };
+    try {
+      const response = await this.client.call('send_qzone_msg', {
+        content: text.slice(0, 2000),
+        ugc_right: ugcRight,
+      });
+      if (response.status !== 'ok') return { ok: false, message: response.message || 'send_qzone_msg 失败' };
+      const data = response.data as { tid?: unknown } | undefined;
+      const tid = typeof data?.tid === 'string' ? data.tid : typeof data?.tid === 'number' ? String(data.tid) : '';
+      return tid === '' ? { ok: true } : { ok: true, tid };
+    } catch (e) {
+      return { ok: false, message: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  /** QQ空间：删除说说 */
+  async qzoneDelete(tid: string): Promise<{ ok: boolean; message?: string }> {
+    if (this.client === undefined) return { ok: false, message: 'QQ 连接未建立' };
+    if (tid.trim() === '') return { ok: false, message: '缺少 tid' };
+    try {
+      const response = await this.client.call('delete_qzone_msg', { tid: tid.trim() });
+      if (response.status !== 'ok') return { ok: false, message: response.message || 'delete_qzone_msg 失败' };
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, message: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
   memorySnapshot(groupId: string): Record<string, unknown> {
     const group = groupMemory(this.memory, groupId);
     const policy = this.policyOf(groupId);

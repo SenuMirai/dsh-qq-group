@@ -76,6 +76,11 @@ export interface QqHost {
   ): Promise<Record<string, unknown>>;
   /** 心情：按群读取/重置 */
   mood(groupId: string, action: 'get' | 'reset'): Promise<Record<string, unknown>>;
+  /** QQ空间：发布/删除/可用性 */
+  qzone(
+    action: 'publish' | 'delete' | 'available',
+    payload?: unknown,
+  ): Promise<Record<string, unknown>>;
   /** 插件卸载时调用 */
   dispose(): Promise<void>;
   /** 当前是否在跑 */
@@ -243,6 +248,25 @@ export function createQqHost(deps: QqHostDeps): QqHost {
     },
 
     /** 记忆面板的读/写/压缩（桥未启动时明确失败） */
+    async qzone(
+      action: 'publish' | 'delete' | 'available',
+      payload?: unknown,
+    ): Promise<Record<string, unknown>> {
+      if (action === 'available') {
+        return { ok: bridge !== undefined && bridge.qzoneAvailable() };
+      }
+      if (bridge === undefined) return { ok: false, message: 'QQ 连接尚未启动' };
+      const data = (payload ?? {}) as { content?: unknown; ugcRight?: unknown; tid?: unknown };
+      if (action === 'publish') {
+        const content = typeof data.content === 'string' ? data.content : '';
+        const ugcRight =
+          typeof data.ugcRight === 'number' && Number.isFinite(data.ugcRight) ? data.ugcRight : 64;
+        return bridge.qzonePublish(content, ugcRight);
+      }
+      const tid = typeof data.tid === 'string' ? data.tid : '';
+      return bridge.qzoneDelete(tid);
+    },
+
     async memory(
       action: 'get' | 'set' | 'compress' | 'v3add' | 'v3update' | 'v3delete',
       groupId: string,

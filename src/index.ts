@@ -87,6 +87,16 @@ type Settings = {
   /** 可编辑的主人优先级提示；空 = 使用内置默认 */
   ownerPriorityPrompt: string;
   activePersonaId: string;
+  /** QQ空间：是否启用、发布模式、可见范围与频率 */
+  qzone: {
+    enabled: boolean;
+    mode: 'manual' | 'draft' | 'auto';
+    ugcRight: number;
+    dailyLimit: number;
+    minIntervalMinutes: number;
+    allowImages: boolean;
+    autoChance: number;
+  };
   mode: 'passive' | 'proactive';
   model: ModelRef;
   /** 备用模型：主模型只回 reasoning / 空回复时切一次 */
@@ -179,6 +189,15 @@ const DEFAULT_SETTINGS: Settings = {
   groupPersonaIds: {},
   ownerPriorityPrompt: DEFAULT_OWNER_PRIORITY,
   activePersonaId: '',
+  qzone: {
+    enabled: false,
+    mode: 'draft',
+    ugcRight: 64,
+    dailyLimit: 1,
+    minIntervalMinutes: 120,
+    allowImages: false,
+    autoChance: 0.2,
+  },
   mode: 'passive',
   model: { provider: '', model: '' },
   fallbackModel: { provider: '', model: '' },
@@ -294,6 +313,21 @@ function readSettings(root: string): Settings {
       ownerPriorityPrompt:
         typeof raw.ownerPriorityPrompt === 'string' ? raw.ownerPriorityPrompt : DEFAULT_OWNER_PRIORITY,
       activePersonaId,
+      qzone: (() => {
+        const source =
+          raw.qzone !== null && typeof raw.qzone === 'object'
+            ? (raw.qzone as Record<string, unknown>)
+            : {};
+        return {
+          enabled: source.enabled === true,
+          mode: source.mode === 'auto' ? 'auto' : source.mode === 'manual' ? 'manual' : 'draft',
+          ugcRight: [1, 4, 16, 64, 128].includes(Number(source.ugcRight)) ? Number(source.ugcRight) : 64,
+          dailyLimit: Math.round(clampNumber(source.dailyLimit, 0, 20, 1)),
+          minIntervalMinutes: Math.round(clampNumber(source.minIntervalMinutes, 0, 1440, 120)),
+          allowImages: source.allowImages === true,
+          autoChance: clampNumber(source.autoChance, 0, 1, 0.2),
+        };
+      })(),
       mode: raw.mode === 'proactive' ? 'proactive' : 'passive',
       model:
         raw.model && typeof raw.model.provider === 'string' && typeof raw.model.model === 'string'
@@ -400,6 +434,55 @@ function writeSettings(root: string, settings: Settings): void {
     }
   }
   writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
+}
+
+/** QQ空间本地记录：tid、正文、时间、可见范围。 */
+type QzoneEntry = { tid: string; content: string; ts: number; ugcRight: number };
+
+const qzonePath = (root: string): string => join(root, 'qzone.json');
+const QZONE_CAP = 200;
+
+function readQzone(root: string): QzoneEntry[] {
+  try {
+    const parsed = JSON.parse(readFileSync(qzonePath(root), 'utf8')) as { entries?: unknown };
+    if (!Array.isArray(parsed.entries)) return [];
+    return parsed.entries
+      .filter(
+        (e): e is QzoneEntry =>
+          e !== null &&
+          typeof e === 'object' &&
+          typeof (e as QzoneEntry).ts === 'number' &&
+          typeof (e as QzoneEntry).content === 'string',
+      )
+      .map((e) => ({
+        tid: typeof e.tid === 'string' ? e.tid : '',
+        content: e.content,
+        ts: e.ts,
+        ugcRight: typeof e.ugcRight === 'number' ? e.ugcRight : 64,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function writeQzone(root: string, entries: QzoneEntry[]): void {
+  const kept = entries.length > QZONE_CAP ? entries.slice(-QZONE_CAP) : entries;
+  writeFileSync(qzonePath(root), `${JSON.stringify({ entries: kept }, null, 2)}\n`, 'utf8');
+}
+
+function appendQzone(root: string, entry: QzoneEntry): void {
+  writeQzone(root, [...readQzone(root), entry]);
+}
+
+/** 发布前清洗：去掉链接、QQ号/群号这类长数字，避免隐私外泄。 */
+function sanitizeQzone(text: string): string {
+  return text
+    .replace(/https?:\/\/\S+/gi, '')
+    .replace(/(?:QQ|qq|群号|群)\s*[:：]?\s*\d{5,}/g, '')
+    .replace(/\b\d{7,}\b/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+    .slice(0, 2000);
 }
 
 /** 主动/被动：直接改群策略里的插话与冷场主动开口（其余概率沿用 qq.json）。 */
@@ -928,6 +1011,36 @@ export function apply(ctx: any): void {
     return { ok: false, launched: true, message: '已执行启动脚本，但 30 秒内网关仍未就绪' };
   };
 
+  const maybeAutoQzone = async (entry: DiaryEntry): Promise<void> => {
+    const qz = readSettings(root).qzone;
+    if (!qz.enabled || qz.mode !== 'auto') return;
+    if (Math.random() >= qz.autoChance) return;
+    const history = readQzone(root);
+    const now = Date.now();
+    const dayStart = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).getTime();
+    if (history.filter((e) => e.ts >= dayStart).length >= qz.dailyLimit) return;
+    const last = history[history.length - 1];
+    if (last !== undefined && now - last.ts < qz.minIntervalMinutes * 60_000) return;
+    const system = [
+      '你在帮鲸鱼娘写一条 QQ 空间说说，用第一人称，像她自己在分享生活。',
+      '100~180 字；口语、有画面、有情绪；可以提今天的聊天感受，但不要复述群聊原文。',
+      '绝对不能出现：QQ 号、群号、人名、文件路径、链接、任何隐私；不要提“AI”“模型”“插件”。',
+      '只输出说说正文。',
+    ].join('\n');
+    const user = `今天的片段：群友说「${(entry.incoming ?? '').slice(0, 120)}」；她说「${entry.reply.slice(0, 160)}」；内心「${(entry.thought ?? '').slice(0, 160)}」`;
+    const result = await generate(system, [], user, { purpose: 'qzone', maxTokens: 400, timeoutMs: 40_000 });
+    if (!result.ok) return;
+    const content = sanitizeQzone(result.text.trim());
+    if (content === '') return;
+    const published = (await qqHost.qzone('publish', { content, ugcRight: qz.ugcRight })) as {
+      ok?: boolean;
+      tid?: string;
+    };
+    if (published.ok === true) {
+      appendQzone(root, { tid: published.tid ?? '', content, ts: now, ugcRight: qz.ugcRight });
+    }
+  };
+
   const qqHost = createQqHost({
     userRoot: root,
     persona: (groupId?: string) => activePersona(readSettings(root), groupId),
@@ -990,6 +1103,7 @@ export function apply(ctx: any): void {
     onDiary: (entry) => {
       try {
         appendDiary(root, entry);
+        void maybeAutoQzone(entry);
       } catch (e) {
         console.warn(`[dsh-qq-group] 写日记失败：${e instanceof Error ? e.message : String(e)}`);
       }
@@ -1736,7 +1850,40 @@ export function apply(ctx: any): void {
                 ? clampNumber(patch.settings.ownerAffinity, -100, 100, current.ownerAffinity)
                 : current.ownerAffinity,
             activePersonaId,
-            mode: patch.settings.mode === 'proactive' ? 'proactive' : patch.settings.mode === 'passive' ? 'passive' : current.mode,
+            qzone: (() => {
+              const incoming =
+                patch.settings.qzone !== null && typeof patch.settings.qzone === 'object'
+                  ? (patch.settings.qzone as Record<string, unknown>)
+                  : {};
+              return {
+                enabled: typeof incoming.enabled === 'boolean' ? incoming.enabled : current.qzone.enabled,
+                mode:
+                  incoming.mode === 'auto' || incoming.mode === 'manual' || incoming.mode === 'draft'
+                    ? incoming.mode
+                    : current.qzone.mode,
+                ugcRight: [1, 4, 16, 64, 128].includes(Number(incoming.ugcRight))
+                  ? Number(incoming.ugcRight)
+                  : current.qzone.ugcRight,
+                dailyLimit:
+                  typeof incoming.dailyLimit === 'number'
+                    ? Math.round(clampNumber(incoming.dailyLimit, 0, 20, current.qzone.dailyLimit))
+                    : current.qzone.dailyLimit,
+                minIntervalMinutes:
+                  typeof incoming.minIntervalMinutes === 'number'
+                    ? Math.round(
+                        clampNumber(incoming.minIntervalMinutes, 0, 1440, current.qzone.minIntervalMinutes),
+                      )
+                    : current.qzone.minIntervalMinutes,
+                allowImages:
+                  typeof incoming.allowImages === 'boolean'
+                    ? incoming.allowImages
+                    : current.qzone.allowImages,
+                autoChance:
+                  typeof incoming.autoChance === 'number'
+                    ? clampNumber(incoming.autoChance, 0, 1, current.qzone.autoChance)
+                    : current.qzone.autoChance,
+              };
+            })(),
             model:
               patch.settings.model &&
               typeof patch.settings.model.provider === 'string' &&
@@ -1922,6 +2069,91 @@ export function apply(ctx: any): void {
       if (rest === 'test') return send(200, await qqHost.handle('qq/test', 'POST'));
       if (rest === 'sing') return send(200, await qqHost.handle('qq/sing', 'POST', body));
       if (rest === 'scores') return send(200, await qqHost.handle('qq/scores', 'GET'));
+
+      if (rest === 'qzone') {
+        const settings = readSettings(root);
+        if (method === 'GET') {
+          const available = (await qqHost.qzone('available')) as { ok?: boolean };
+          return send(200, {
+            ok: true,
+            settings: settings.qzone,
+            entries: readQzone(root).slice(-50).reverse(),
+            available: available.ok === true,
+          });
+        }
+        if (method !== 'POST') return send(405, { error: 'method not allowed' });
+        const payload = (body ?? {}) as { action?: unknown; content?: unknown; tid?: unknown; ugcRight?: unknown };
+        const action = typeof payload.action === 'string' ? payload.action : '';
+
+        if (action === 'generate') {
+          const today = new Date();
+          const start = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+          const entries = readDiary(root)
+            .filter((e) => e.ts >= start)
+            .slice(-6);
+          if (entries.length === 0) {
+            return send(200, { ok: false, message: '今天还没有日记，先聊几句再生成' });
+          }
+          const material = entries
+            .map((e) => `- 群友：${(e.incoming ?? '').slice(0, 120)}；她：${e.reply.slice(0, 160)}；内心：${(e.thought ?? '').slice(0, 160)}`)
+            .join('\n');
+          const system = [
+            '你在帮鲸鱼娘写一条 QQ 空间说说，用第一人称，像她自己在分享生活。',
+            '要求：100~180 字；口语、有画面、有情绪；可以提今天的聊天感受，但不要复述群聊原文。',
+            '绝对不能出现：QQ 号、群号、人名、文件路径、链接、任何隐私；不要提“AI”“模型”“插件”。',
+            '不要用列表、不要用话题标签、不要写“今天更新了”。只输出说说正文。',
+          ].join('\n');
+          const result = await generate(system, [], `今天的素材：\n${material}`, {
+            purpose: 'qzone',
+            maxTokens: 400,
+            timeoutMs: 40_000,
+          });
+          if (!result.ok) return send(200, { ok: false, message: result.message });
+          return send(200, { ok: true, content: result.text.trim() });
+        }
+
+        if (action === 'publish') {
+          if (!settings.qzone.enabled) return send(200, { ok: false, message: 'QQ空间未启用' });
+          const content = sanitizeQzone(typeof payload.content === 'string' ? payload.content : '');
+          if (content === '') return send(200, { ok: false, message: '说说正文为空' });
+          const history = readQzone(root);
+          const now = Date.now();
+          const dayStart = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).getTime();
+          const todayCount = history.filter((e) => e.ts >= dayStart).length;
+          if (todayCount >= settings.qzone.dailyLimit) {
+            return send(200, { ok: false, message: `今天已达上限（${settings.qzone.dailyLimit} 条）` });
+          }
+          const last = history[history.length - 1];
+          if (last !== undefined && now - last.ts < settings.qzone.minIntervalMinutes * 60_000) {
+            return send(200, { ok: false, message: `距上一条不足 ${settings.qzone.minIntervalMinutes} 分钟` });
+          }
+          const ugcRight =
+            typeof payload.ugcRight === 'number' && [1, 4, 16, 64, 128].includes(payload.ugcRight)
+              ? payload.ugcRight
+              : settings.qzone.ugcRight;
+          const published = (await qqHost.qzone('publish', { content, ugcRight })) as {
+            ok?: boolean;
+            tid?: string;
+            message?: string;
+          };
+          if (published.ok !== true) {
+            return send(200, { ok: false, message: published.message || '发布失败' });
+          }
+          appendQzone(root, { tid: published.tid ?? '', content, ts: now, ugcRight });
+          return send(200, { ok: true, tid: published.tid ?? '' });
+        }
+
+        if (action === 'delete') {
+          const tid = typeof payload.tid === 'string' ? payload.tid.trim() : '';
+          if (tid === '') return send(200, { ok: false, message: '缺少 tid' });
+          const deleted = (await qqHost.qzone('delete', { tid })) as { ok?: boolean; message?: string };
+          if (deleted.ok !== true) return send(200, { ok: false, message: deleted.message || '删除失败' });
+          writeQzone(root, readQzone(root).filter((e) => e.tid !== tid));
+          return send(200, { ok: true });
+        }
+
+        return send(200, { ok: false, message: '未知 action' });
+      }
 
       const proxied = await qqHost.handle(`qq/${rest}`, method, body);
       if (proxied === null) return send(404, { error: 'not found', rest });
