@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 1.20.3 — Edge 回退音色与语音看门狗
+
+- 修复本地 TTS 失败回退 Edge 时，把角色名「三月七/银狼」当 Edge 音色，报 `Invalid voice '三月七'`。
+- 回退 Edge 现在强制使用合法音色 `zh-CN-XiaoyiNeural`；Edge 直连时也会校验音色格式。
+- 新增本地语音看门狗：每 20 秒检查 9880/50123，掉线自动拉起；已加入启动文件夹。
+- 说明：试听不生效通常仍是 DSH 未重启、运行旧版；重启后 `/version` 必须是 1.20.3。
+
 ## 1.20.2 — 转发聊天记录回归修复
 
 - 修复 `readForwardContext` 使用未传入的 groupId，运行时 ReferenceError 被 catch 吞掉，导致纯文字转发也显示“没看着转发内容”。

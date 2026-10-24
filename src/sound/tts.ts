@@ -263,10 +263,15 @@ export class Speaker {
     }
 
     const provider = options.provider ?? 'edge';
+    // 角色名（三月七/银狼）不是 Edge 音色；回退 Edge 时必须换合法音色。
+    const edgeVoice =
+      typeof options.voice === 'string' && /^[a-z]{2}-[A-Z]{2}-/i.test(options.voice)
+        ? options.voice
+        : 'zh-CN-XiaoyiNeural';
     let result: TtsResult =
       provider === 'edge'
         ? await hostSynthesize(this.userRoot, trimmed, {
-            voice: options.voice,
+            voice: edgeVoice,
             rate: options.rate,
             pitch: options.pitch,
             volume: options.volume,
@@ -276,7 +281,7 @@ export class Speaker {
       // 本地 GPT-SoVITS/CosyVoice/Kokoro 网关没启动时，不能把整条语音吞掉。
       console.warn(`[dsh-qq-group] 本地 TTS 失败，回退 Edge：${result.message}`);
       result = await hostSynthesize(this.userRoot, trimmed, {
-        voice: options.voice,
+        voice: edgeVoice,
         rate: options.rate,
         pitch: options.pitch,
         volume: options.volume,
