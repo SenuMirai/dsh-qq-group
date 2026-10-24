@@ -1291,6 +1291,7 @@ export class QqBridge {
 
   /** 展开合并转发（依赖 NapCat get_forward_msg） */
   private async readForwardContext(
+    groupId: string,
     policy: GroupPolicy,
     message: GroupMessage | undefined,
   ): Promise<string> {
@@ -1456,7 +1457,7 @@ export class QqBridge {
     }
     if (forwards.length > 0 && policy.forwardReadMode !== 'off') {
       const pseudo = { ...(message as GroupMessage), forwards } as GroupMessage;
-      parts.push(await this.readForwardContext(policy, pseudo));
+      parts.push(await this.readForwardContext(groupId, policy, pseudo));
     }
     return parts.filter((part) => part.trim() !== '').join('\n');
   }
@@ -1611,7 +1612,7 @@ export class QqBridge {
         ? await this.readFileContext(groupId, policy, message)
         : '';
       const forwardNote = this.shouldReadForwards(groupId, policy, message, mode)
-        ? await this.readForwardContext(policy, message)
+        ? await this.readForwardContext(groupId, policy, message)
         : '';
       const quotedNote =
         message?.replyToId !== undefined &&

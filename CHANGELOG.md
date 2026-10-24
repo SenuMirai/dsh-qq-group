@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 1.20.2 — 转发聊天记录回归修复
+
+- 修复 `readForwardContext` 使用未传入的 groupId，运行时 ReferenceError 被 catch 吞掉，导致纯文字转发也显示“没看着转发内容”。
+- 引用转发和直接转发现在都传入 groupId，转发图片仍会进入视觉输入。
+- 纯文字单层转发恢复正常读取。
+
 ## 1.20.1 — 角色音色与试听修复
 
 - 修复 API 只加载 v2ProPlus 底模、不是角色权重的问题：tts_infer.yaml 现在直接指向三月七 GPT/SoVITS 权重。
