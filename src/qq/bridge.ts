@@ -305,6 +305,8 @@ export class QqBridge {
   private readonly pendingTexts = new Map<string, string[]>();
   /** 这一波最后一条消息：普通闲聊回复也要带上，否则自拍/发图/引用都识别不到 */
   private readonly pendingMessage = new Map<string, GroupMessage>();
+  /** 主人刚发、还没回复的普通消息：别人 @ 她时先回主人 */
+  private readonly pendingOwner = new Map<string, { message: GroupMessage; policy: GroupPolicy; at: number }>();
   /** 引用/转发聊天记录里带的图片，供本轮视觉输入 */
   private readonly forwardImages = new Map<string, ObSegment[]>();
   /** 这一波最后说话的人：成员概率用 */
@@ -1168,6 +1170,11 @@ export class QqBridge {
       policy.fileReadMode !== 'off' && /群文件|群文件夹|文件里找|找一下.*文件|有没有.*文件|翻.*文件/.test(message.text);
     // 画像：所有开启群里的发言都记；主人初始 +60，白名单 +20
     const userRules = this.deps.rules?.(userId);
+    // 黑名单是硬拦截：连 @/叫名字/引用她也不回，避免直接分支绕过评分。
+    if (userRules?.blacklist === true && userRules.owner !== true) {
+      this.log('info', `群 ${groupId} 忽略黑名单成员 ${name}（${userId}）`);
+      return;
+    }
     const initialAffinity =
       userRules?.owner === true
         ? userRules.initialOwnerAffinity ?? 60
@@ -1193,6 +1200,28 @@ export class QqBridge {
       /鲸鱼|deepseek|大肥鱼|机器人/i.test(message.text) ||
       /\bai\b/i.test(message.text);
     if (aboutHer) this.judgeHostility(groupId, message);
+
+    // 主人刚说完、还没轮到回复时，别人 @ 她：先把主人这条回掉，别让直回抢走。
+    const ownerPending = this.pendingOwner.get(groupId);
+    if (
+      ownerPending !== undefined &&
+      ownerPending.message.userId !== userId &&
+      now - ownerPending.at <= 30_000 &&
+      !this.busy.has(groupId)
+    ) {
+      this.pendingOwner.delete(groupId);
+      clearChatWindow(state);
+      this.pendingTexts.delete(groupId);
+      this.pendingMessage.delete(groupId);
+      this.pendingAtOther.delete(groupId);
+      this.pendingReplyOther.delete(groupId);
+      this.log('info', `群 ${groupId} 主人消息优先：先回主人，暂缓他人 @`);
+      await this.replyTo(groupId, ownerPending.policy, ownerPending.message, 'at', now);
+      return;
+    }
+    if (ownerPending !== undefined && ownerPending.message.userId === userId) {
+      this.pendingOwner.delete(groupId);
+    }
 
     // @ 与叫名字 / 引用她：立刻回（不受去抖窗口影响，但受冷却/限流约束）
     // 「叫名字」在提示词里与 @ 同一档：都是明确的「在跟你说话」
@@ -1230,6 +1259,7 @@ export class QqBridge {
       if (texts.length > 10) texts.shift();
       this.pendingTexts.set(groupId, texts);
       this.pendingMessage.set(groupId, message);
+      if (userRules?.owner === true) this.pendingOwner.set(groupId, { message, policy, at: now });
     }
     if ((message.atOthers?.length ?? 0) > 0) this.pendingAtOther.set(groupId, true);
     if (
@@ -1809,6 +1839,9 @@ export class QqBridge {
     if (this.busy.has(groupId)) {
       this.log('debug', `群 ${groupId} 正在回复中，跳过这次`);
       return;
+    }
+    if (message !== undefined && this.pendingOwner.get(groupId)?.message.messageId === message.messageId) {
+      this.pendingOwner.delete(groupId);
     }
     const state = this.stateOf(groupId);
     // 主动 @主人：冷场开口时由外层传入；普通接话要等真正通过限流后再掷骰。
