@@ -244,6 +244,8 @@ export function parseReplyPlan(raw: string): ReplyPlan {
       // 落到下面的按行切分
     }
   }
+  const pseudo = parsePseudoPlan(cleaned);
+  if (pseudo !== undefined) return pseudo;
   const salvaged = salvagePlan(cleaned);
   if (salvaged !== undefined) return salvaged;
   const lines = cleaned
@@ -254,6 +256,7 @@ export function parseReplyPlan(raw: string): ReplyPlan {
       // 模型输出被截断时会退化成 JSON 片段；不要把片段当正文发出去。
       if (/^[{}[\],\s]*$/.test(line)) return false;
       if (/^"(?:messages|action|song|sticker|thought|emotion)"\s*:/.test(line)) return false;
+      if (/^\s*(?:thought|messages)\s*[:：]/i.test(line)) return false;
       if (/"messages"\s*:/.test(line) || /"action"\s*:/.test(line)) return false;
       return true;
     })
@@ -266,6 +269,73 @@ export function parseReplyPlan(raw: string): ReplyPlan {
     action: 'text',
     ...(thought === undefined ? {} : { thought }),
     ...(emotion === undefined ? {} : { emotion }),
+  };
+}
+
+/** 兼容模型退化成 `thought: ... / messages: [...]` 的伪格式；绝不把 thought 当正文发出去。 */
+function parsePseudoPlan(text: string): ReplyPlan | undefined {
+  const messageMatch = /(?:^|\n)\s*messages\s*[:：]\s*([\s\S]*)$/i.exec(text);
+  if (messageMatch === null) return undefined;
+  const payload = messageMatch[1].trim();
+  const messages: string[] = [];
+  const start = payload.indexOf('[');
+  if (start >= 0) {
+    let depth = 0;
+    let quote = false;
+    let escape = false;
+    for (let i = start; i < payload.length; i += 1) {
+      const ch = payload[i];
+      if (quote) {
+        if (escape) escape = false;
+        else if (ch === '\\') escape = true;
+        else if (ch === '"') quote = false;
+        continue;
+      }
+      if (ch === '"') quote = true;
+      else if (ch === '[') depth += 1;
+      else if (ch === ']') {
+        depth -= 1;
+        if (depth === 0) {
+          try {
+            const parsed = JSON.parse(payload.slice(start, i + 1)) as unknown;
+            if (Array.isArray(parsed)) {
+              for (const value of parsed) {
+                if (typeof value === 'string' && value.trim() !== '') messages.push(value.trim());
+              }
+            }
+          } catch {
+            // 落到下面的引号/按行提取
+          }
+          break;
+        }
+      }
+    }
+  }
+  if (messages.length === 0) {
+    const quoted = /"((?:\\.|[^"\\])*)"/g;
+    let match: RegExpExecArray | null;
+    while ((match = quoted.exec(payload)) !== null) {
+      try {
+        const value = JSON.parse(`"${match[1]}"`) as string;
+        if (value.trim() !== '') messages.push(value.trim());
+      } catch {
+        // 忽略损坏的引号片段
+      }
+    }
+  }
+  if (messages.length === 0) {
+    for (const line of payload.split(/\r?\n+/)) {
+      const value = line.replace(/^\s*(?:[-*•]|\d+[.、)])\s*/, '').trim();
+      if (value !== '' && !/^[{}[\],]+$/.test(value)) messages.push(value);
+    }
+  }
+  if (messages.length === 0) return undefined;
+  const thoughtMatch = /(?:^|\n)\s*thought\s*[:：]\s*([\s\S]*?)(?=\n\s*messages\s*[:：]|$)/i.exec(text);
+  const thought = thoughtMatch?.[1]?.trim();
+  return {
+    messages,
+    action: 'text',
+    ...(thought === undefined || thought === '' ? {} : { thought }),
   };
 }
 

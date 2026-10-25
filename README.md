@@ -1,6 +1,6 @@
 # dsh-qq-group
 
-> 当前版本：**v1.24.4**（QQ空间配图/@/远程读取、红包、主动 @主人、七角色语音）
+> 当前版本：**v1.25.0**（QQ空间配图/@/远程读取、红包、主动 @主人、七角色语音）
 
 独立的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) QQ 群聊插件：有人设、有记忆、会判断该不该接话，支持主动/被动搭话、语音、唱歌、表情包、日记、QQ空间说说和视觉看图。
 
@@ -35,6 +35,7 @@ A standalone QQ group-chat plugin for [DeepSeek Harness](https://github.com/deep
 | **视觉看图** | 可看当前/引用图片，也支持转发聊天记录里的图片；嵌套转发最多展开两层；本地路径与文件头识别 |
 | **回复引用** | 目标消息被后续消息隔开时自动带 QQ 引用，可开关；文件/合并转发/语音不引用，失败自动改发纯文字 |
 | **省 token** | 自适应上下文（自包含短句少读、指代/追问读全量）、contextTurns、记忆注入条数、情绪/敌意判断开关 |
+| **永久记忆** | 独立于摘要/淡忘；自动记录主人和自定义名单的话；容量满了只封存；手动增删、多选 AI 合并 |
 | **夜间免打扰** | 支持跨午夜；夜间不再主动开口，普通接话按命中扣分（0~100，默认 20） |
 | **心情** | 每群独立心情；会随互动升降、随时间回落，被辱骂/恶意攻击会下降 |
 | **用量统计** | 按群、按用途、按模型统计 token；图片调用与估算调用单独标记；月历、余额估算、单价校准 |
@@ -152,7 +153,8 @@ DSH 设置 →「QQ 群聊」→「连接」：
 |---|---|
 | `$DSH_HOME/dsh-qq-group/qq.json` | 连接、群策略、语音/唱歌 |
 | `$DSH_HOME/dsh-qq-group/settings.json` | 人设、模型、名单、夜间、看图 |
-| `$DSH_HOME/dsh-qq-group/qq-memory.json` | 每群记忆（上限 200 条/群） |
+| `$DSH_HOME/dsh-qq-group/qq-memory.json` | 每群短期记忆（上限 200 条/群） |
+| `$DSH_HOME/dsh-qq-group/permanent-memory.json` | 永久记忆（不摘要、不淡忘，按会话分开） |
 | `$DSH_HOME/dsh-qq-group/profiles.json` | 每群每人画像 |
 | `$DSH_HOME/dsh-qq-group/diary.json` | 日记（上限 1000 条） |
 | `$DSH_HOME/dsh-qq-group/qzone.json` | QQ空间发布记录（tid、正文、时间、可见范围） |
@@ -227,6 +229,7 @@ GPT-SoVITS/ref/*.wav
 - [语音模型安装](./docs/VOICE-MODELS.md)
 - [红包识别与限制](./docs/RED-PACKET.md)
 - [QQ空间增强与风险](./docs/QZONE.md)
+- [记忆架构与永久记忆](./docs/MEMORY.md)
 - [常用命令与接口](./docs/COMMANDS.md)
 - [触发词与指令](./docs/TRIGGERS.md)
 - [更新日志](./CHANGELOG.md)

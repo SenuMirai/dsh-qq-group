@@ -24,6 +24,14 @@ import type { GroupPolicy, QqConfig, QqRvcConfig } from './qq/config';
 import type { DiaryEntry, ProfileStore } from './qq/bridge';
 import type { ObSegment } from './qq/types';
 import {
+  addPermanent,
+  deletePermanent,
+  listPermanent,
+  readPermanentStore,
+  replacePermanent,
+  writePermanentStore,
+} from './qq/permanent';
+import {
   createStickerHub,
   deleteStickers,
   listStickerInfo,
@@ -113,6 +121,17 @@ type Settings = {
     commentEnabled: boolean;
     commentRiskAccepted: boolean;
     autoChance: number;
+  };
+  permanent: {
+    enabled: boolean;
+    /** 自动记录名单里的人和主人说的话 */
+    autoCapture: boolean;
+    /** 额外重要的人（QQ 号）；主人始终包含 */
+    people: string[];
+    /** 每个群/会话的容量；满了只封存不删除 */
+    capacity: number;
+    recallLimit: number;
+    recallChars: number;
   };
   mode: 'passive' | 'proactive';
   model: ModelRef;
@@ -226,6 +245,14 @@ const DEFAULT_SETTINGS: Settings = {
     commentEnabled: false,
     commentRiskAccepted: false,
     autoChance: 0.2,
+  },
+  permanent: {
+    enabled: true,
+    autoCapture: true,
+    people: [],
+    capacity: 200,
+    recallLimit: 12,
+    recallChars: 1500,
   },
   mode: 'passive',
   model: { provider: '', model: '' },
@@ -391,6 +418,28 @@ function readSettings(root: string): Settings {
           autoChance: clampNumber(source.autoChance, 0, 1, 0.2),
         };
       })(),
+      permanent: (() => {
+        const source =
+          raw.permanent !== null && typeof raw.permanent === 'object'
+            ? (raw.permanent as Record<string, unknown>)
+            : {};
+        return {
+          enabled: source.enabled !== false,
+          autoCapture: source.autoCapture !== false,
+          people: Array.isArray(source.people)
+            ? Array.from(
+                new Set(
+                  source.people
+                    .map((x) => String(x).trim())
+                    .filter((x) => /^\d{5,12}$/.test(x)),
+                ),
+              ).slice(0, 50)
+            : [],
+          capacity: Math.round(clampNumber(source.capacity, 10, 5000, 200)),
+          recallLimit: Math.round(clampNumber(source.recallLimit, 1, 50, 12)),
+          recallChars: Math.round(clampNumber(source.recallChars, 200, 8000, 1500)),
+        };
+      })(),
       mode: raw.mode === 'proactive' ? 'proactive' : 'passive',
       model:
         raw.model && typeof raw.model.provider === 'string' && typeof raw.model.model === 'string'
@@ -544,6 +593,47 @@ function writeQzone(root: string, entries: QzoneEntry[]): void {
 
 function appendQzone(root: string, entry: QzoneEntry): void {
   writeQzone(root, [...readQzone(root), entry]);
+}
+
+/** 永久记忆：独立文件，不参与摘要/淡忘。 */
+const permanentPath = (root: string): string => join(root, 'permanent-memory.json');
+
+function permanentList(root: string, groupId: string): ReturnType<typeof listPermanent> {
+  return listPermanent(readPermanentStore(permanentPath(root)), groupId);
+}
+
+function permanentAdd(
+  root: string,
+  groupId: string,
+  input: { text: string; people?: string[]; source?: 'auto' | 'manual' | 'merge'; mergeWithinMs?: number },
+  capacity: number,
+): ReturnType<typeof addPermanent> {
+  const path = permanentPath(root);
+  const store = readPermanentStore(path);
+  const result = addPermanent(store, groupId, input, capacity);
+  if (result.ok || result.reason === 'full') writePermanentStore(path, store);
+  return result;
+}
+
+function permanentDelete(root: string, groupId: string, id: string): boolean {
+  const path = permanentPath(root);
+  const store = readPermanentStore(path);
+  const ok = deletePermanent(store, groupId, id);
+  if (ok) writePermanentStore(path, store);
+  return ok;
+}
+
+function permanentMerge(
+  root: string,
+  groupId: string,
+  ids: string[],
+  text: string,
+): ReturnType<typeof replacePermanent> {
+  const path = permanentPath(root);
+  const store = readPermanentStore(path);
+  const item = replacePermanent(store, groupId, ids, text);
+  if (item !== undefined) writePermanentStore(path, store);
+  return item;
 }
 
 /** 发布前清洗：去掉链接、QQ号/群号这类长数字，避免隐私外泄。 */
@@ -1259,6 +1349,16 @@ export function apply(ctx: any): void {
       readQzone(root)
         .slice(-Math.max(1, Math.min(20, limit)))
         .map((entry) => ({ content: entry.content, ts: entry.ts })),
+    permanent: {
+      enabled: () => readSettings(root).permanent.enabled,
+      autoCapture: () => readSettings(root).permanent.autoCapture,
+      people: () => readSettings(root).permanent.people,
+      recallLimit: () => readSettings(root).permanent.recallLimit,
+      recallChars: () => readSettings(root).permanent.recallChars,
+      add: (groupId, input) =>
+        permanentAdd(root, groupId, input, readSettings(root).permanent.capacity),
+      list: (groupId) => permanentList(root, groupId),
+    },
     onDiary: (entry) => {
       try {
         appendDiary(root, entry);
@@ -2150,6 +2250,43 @@ export function apply(ctx: any): void {
                     : current.qzone.autoChance,
               };
             })(),
+            permanent: (() => {
+              const incoming =
+                patch.settings.permanent !== null && typeof patch.settings.permanent === 'object'
+                  ? (patch.settings.permanent as Record<string, unknown>)
+                  : {};
+              return {
+                enabled:
+                  typeof incoming.enabled === 'boolean' ? incoming.enabled : current.permanent.enabled,
+                autoCapture:
+                  typeof incoming.autoCapture === 'boolean'
+                    ? incoming.autoCapture
+                    : current.permanent.autoCapture,
+                people: Array.isArray(incoming.people)
+                  ? Array.from(
+                      new Set(
+                        incoming.people
+                          .map((x) => String(x).trim())
+                          .filter((x) => /^\d{5,12}$/.test(x)),
+                      ),
+                    ).slice(0, 50)
+                  : current.permanent.people,
+                capacity:
+                  typeof incoming.capacity === 'number'
+                    ? Math.round(clampNumber(incoming.capacity, 10, 5000, current.permanent.capacity))
+                    : current.permanent.capacity,
+                recallLimit:
+                  typeof incoming.recallLimit === 'number'
+                    ? Math.round(clampNumber(incoming.recallLimit, 1, 50, current.permanent.recallLimit))
+                    : current.permanent.recallLimit,
+                recallChars:
+                  typeof incoming.recallChars === 'number'
+                    ? Math.round(
+                        clampNumber(incoming.recallChars, 200, 8000, current.permanent.recallChars),
+                      )
+                    : current.permanent.recallChars,
+              };
+            })(),
             model:
               patch.settings.model &&
               typeof patch.settings.model.provider === 'string' &&
@@ -2332,6 +2469,89 @@ export function apply(ctx: any): void {
       if (rest === 'test') return send(200, await qqHost.handle('qq/test', 'POST'));
       if (rest === 'sing') return send(200, await qqHost.handle('qq/sing', 'POST', body));
       if (rest === 'scores') return send(200, await qqHost.handle('qq/scores', 'GET'));
+
+      if (rest === 'memory/permanent') {
+        const settings = readSettings(root);
+        const urlGroup = url.searchParams.get('groupId') ?? '';
+        if (method === 'GET') {
+          const groupId = urlGroup;
+          if (groupId === '') return send(200, { ok: false, message: '缺少 groupId' });
+          const store = readPermanentStore(permanentPath(root));
+          const group = store.groups[groupId];
+          const items = permanentList(root, groupId);
+          return send(200, {
+            ok: true,
+            groupId,
+            items,
+            count: items.length,
+            capacity: settings.permanent.capacity,
+            sealed: group?.sealedAt !== undefined,
+            ...(group?.sealedAt === undefined ? {} : { sealedAt: group.sealedAt }),
+          });
+        }
+        if (method !== 'POST') return send(405, { error: 'method not allowed' });
+        const payload = (JSON.parse(body || 'null') as {
+          action?: unknown;
+          groupId?: unknown;
+          text?: unknown;
+          id?: unknown;
+          ids?: unknown;
+        } | null) ?? {};
+        const groupId = typeof payload.groupId === 'string' ? payload.groupId : urlGroup;
+        if (groupId === '') return send(200, { ok: false, message: '缺少 groupId' });
+        const action = typeof payload.action === 'string' ? payload.action : '';
+        if (action === 'add') {
+          const text = typeof payload.text === 'string' ? payload.text.trim() : '';
+          const added = permanentAdd(
+            root,
+            groupId,
+            { text, people: [], source: 'manual' },
+            settings.permanent.capacity,
+          );
+          if (!added.ok) {
+            return send(200, {
+              ok: false,
+              reason: added.reason,
+              message:
+                added.reason === 'full'
+                  ? `永久记忆已满（${added.capacity} 条）；请先删除或合并，旧记忆不会被自动删除`
+                  : '记忆内容为空',
+            });
+          }
+          return send(200, { ok: true, item: added.item });
+        }
+        if (action === 'delete') {
+          const id = typeof payload.id === 'string' ? payload.id : '';
+          const ok = id !== '' && permanentDelete(root, groupId, id);
+          return send(200, ok ? { ok: true } : { ok: false, message: '没有找到这条记忆' });
+        }
+        if (action === 'merge') {
+          const ids = Array.isArray(payload.ids)
+            ? payload.ids.filter((x): x is string => typeof x === 'string').slice(0, 50)
+            : [];
+          const selected = permanentList(root, groupId).filter((item) => ids.includes(item.id));
+          if (selected.length < 2) return send(200, { ok: false, message: '至少选择两条永久记忆' });
+          const material = selected.map((item) => `- ${item.text}`).join('\n');
+          const result = await generate(
+            [
+              '把下面多条永久记忆合并成一条。',
+              '要求：保留事实、约定、称呼、偏好和关键细节；去掉重复和口水话；不要添加原文没有的内容。',
+              '只输出合并后的正文，不要列表、不要解释，最多 2000 字。',
+            ].join('\n'),
+            [],
+            material,
+            { purpose: 'permanent-merge', maxTokens: 700, timeoutMs: 40_000 },
+          );
+          const mergedText = result.ok
+            ? result.text.trim().slice(0, 2000)
+            : selected.map((item) => item.text).join('；').slice(0, 2000);
+          if (mergedText === '') return send(200, { ok: false, message: '合并结果为空' });
+          const merged = permanentMerge(root, groupId, ids, mergedText);
+          if (merged === undefined) return send(200, { ok: false, message: '合并失败' });
+          return send(200, { ok: true, item: merged, count: permanentList(root, groupId).length });
+        }
+        return send(200, { ok: false, message: '未知 action' });
+      }
 
       if (rest === 'qzone/remote' && method === 'GET') {
         const qz = readSettings(root).qzone;

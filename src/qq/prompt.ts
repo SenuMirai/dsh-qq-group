@@ -80,6 +80,8 @@ export interface PromptInput {
   ownerMention?: boolean;
   /** 最近发过的 QQ空间动态（本地记录） */
   qzonePosts?: string[];
+  /** 永久记忆（不随时间衰减；主人可管理） */
+  permanentMemories?: string[];
 }
 
 /** 场合不同，任务不同 */
@@ -155,6 +157,16 @@ export function groupSystemPrompt(input: PromptInput): string {
         : ['', '【主人优先级】', DEFAULT_OWNER_PRIORITY.replaceAll('{{ownerQq}}', input.ownerQq)].join('\n'),
     );
   }
+  if (input.permanentMemories !== undefined && input.permanentMemories.length > 0) {
+    parts.push(
+      [
+        '',
+        '【永久记忆（不会随时间淡忘；主人可手动增删）】',
+        ...input.permanentMemories.map((memory) => `- ${memory}`),
+        '这些是主人指定保留的内容，可以自然引用；不要逐条复述，也不要编造没写的事。',
+      ].join('\n'),
+    );
+  }
   if (input.qzonePosts !== undefined && input.qzonePosts.length > 0) {
     parts.push(
       [
@@ -162,6 +174,7 @@ export function groupSystemPrompt(input: PromptInput): string {
         '【你最近发过的 QQ空间动态（本地记录）】',
         ...input.qzonePosts.map((post) => `- ${post}`),
         '有人问你空间发了什么时，按这些回答；不要编造没发过的内容。',
+        '有记录就必须按记录回答，不要装傻、不要说“梦游发的”、不要反问他看到了什么；只有完全没记录时才说没发过或记不清。',
       ].join('\n'),
     );
   }
@@ -296,6 +309,7 @@ export function groupSystemPrompt(input: PromptInput): string {
   parts.push(
     [
       '【输出格式】只输出一个 JSON 对象，不要有别的文字：',
+      '不要输出 thought: / messages: 这种伪格式，也不要输出 Markdown 代码块。',
       '{',
       '  "thought": "（第一项，必须写：2~3 句不发送的内心吐槽，会写进鲸鱼娘的日记；用第一人称，别太客气）",',
       `  "messages": ["第一条", "第二条"],`,

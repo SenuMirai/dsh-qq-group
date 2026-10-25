@@ -31,6 +31,7 @@ import { appendFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } f
 import { basename, dirname, join } from 'node:path';
 
 import { PRIVATE_KEY_PREFIX, policyFor, privateKey, privatePolicyFor, type GroupPolicy, type QqConfig } from './config';
+import { selectPermanent, type PermanentAddInput, type PermanentAddResult, type PermanentEntry } from './permanent';
 
 /** 会话 key 是不是私聊（用于在少数必须区分的地方做分派） */
 const isPrivateKey = (key: string): boolean => key.startsWith(PRIVATE_KEY_PREFIX);
@@ -156,6 +157,16 @@ export interface BridgeDeps {
   hostilityJudge?: () => boolean;
   /** 最近发过的 QQ空间动态（本地记录，供群聊回答“你空间发了什么”） */
   qzoneRecent?: (limit: number) => Array<{ content: string; ts: number }>;
+  /** 永久记忆：独立于摘要/淡忘，按会话存 */
+  permanent?: {
+    enabled: () => boolean;
+    autoCapture: () => boolean;
+    people: () => string[];
+    recallLimit: () => number;
+    recallChars: () => number;
+    add: (groupId: string, input: PermanentAddInput) => PermanentAddResult;
+    list: (groupId: string) => PermanentEntry[];
+  };
 }
 
 /** 画像操作的桥接接口（实现见 plugin index） */
@@ -280,6 +291,7 @@ export class QqBridge {
   /** groupId -> 本次生成 token；用于卡死解锁，避免旧任务 finally 误删新任务 */
   private readonly busySince = new Map<string, string>();
   private busySeq = 0;
+  private readonly permanentFullNotified = new Set<string>();
   /** 正在压缩记忆的群 */
   private readonly compressing = new Set<string>();
   private readonly memoryV3Extracting = new Set<string>();
@@ -1067,6 +1079,26 @@ export class QqBridge {
         });
       }
       if (links.length > 0) this.log('info', `群 ${groupId} 记住主人提供的链接 ${links.length} 条`);
+    }
+
+    if (
+      this.deps.permanent !== undefined &&
+      this.deps.permanent.enabled() &&
+      this.deps.permanent.autoCapture() &&
+      message.text.trim() !== '' &&
+      !message.text.trim().startsWith('/') &&
+      (this.isOwner(userId) || this.deps.permanent.people().includes(userId))
+    ) {
+      const added = this.deps.permanent.add(groupId, {
+        text: `${message.name}：${message.text}`,
+        people: [userId],
+        source: 'auto',
+        mergeWithinMs: 10 * 60_000,
+      });
+      if (!added.ok && added.reason === 'full' && !this.permanentFullNotified.has(groupId)) {
+        this.permanentFullNotified.add(groupId);
+        this.log('warn', `群 ${groupId} 永久记忆已满（${added.capacity} 条），已停止自动记录，等待手动清理`);
+      }
     }
 
     if (message.redPacket === true && policy.redPacketEnabled) {
@@ -1987,6 +2019,18 @@ export class QqBridge {
           ? []
           : await this.downloadChatImages({ images: forwardSegs } as GroupMessage);
       const chatImages = [...baseChatImages, ...forwardChatImages].slice(0, 2);
+      const permanentMemories =
+        this.deps.permanent === undefined || !this.deps.permanent.enabled()
+          ? []
+          : selectPermanent(
+              this.deps.permanent.list(groupId),
+              message?.text ?? '',
+              this.deps.permanent.recallLimit(),
+              this.deps.permanent.recallChars(),
+            ).map(
+              (item) =>
+                `${new Date(item.createdAt).toLocaleDateString('zh-CN')}：${item.text.replace(/\n/g, ' / ').slice(0, 500)}`,
+            );
       const system = groupSystemPrompt({
         persona: this.deps.persona(groupId),
         selfName: this.config.selfName,
@@ -2009,6 +2053,7 @@ export class QqBridge {
         ownerQq: this.config.ownerQq,
         ownerMention: mentionOwner,
         ownerPriorityPrompt: this.deps.ownerPriority?.(),
+        ...(permanentMemories.length > 0 ? { permanentMemories } : {}),
         ...(/空间|说说|动态|qzone/i.test(message?.text ?? '') && this.deps.qzoneRecent !== undefined
           ? {
               qzonePosts: this.deps.qzoneRecent(5).map(
