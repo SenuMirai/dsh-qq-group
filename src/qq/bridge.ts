@@ -270,6 +270,9 @@ export class QqBridge {
   private running = false;
   /** 正在处理中的群（同一个群不并发回复） */
   private readonly busy = new Set<string>();
+  /** groupId -> 本次生成 token；用于卡死解锁，避免旧任务 finally 误删新任务 */
+  private readonly busySince = new Map<string, string>();
+  private busySeq = 0;
   /** 正在压缩记忆的群 */
   private readonly compressing = new Set<string>();
   private readonly memoryV3Extracting = new Set<string>();
@@ -1774,7 +1777,9 @@ export class QqBridge {
       mentionOwner = this.shouldMentionOwner(policy, state, now);
     }
 
+    const busyToken = `${Date.now()}-${++this.busySeq}`;
     this.busy.add(groupId);
+    this.busySince.set(groupId, busyToken);
     try {
       const group = groupMemory(this.memory, groupId);
       const needsContext =
@@ -2157,11 +2162,14 @@ export class QqBridge {
     } catch (e) {
       this.recordError(`回复流程异常：${e instanceof Error ? e.message : String(e)}`);
     } finally {
-      this.busy.delete(groupId);
-      this.deps.onState?.();
-      this.scheduleTick();
-      // 生成期间排队的 @/引用消息：现在立刻处理下一条
-      this.drainPendingDirect(groupId);
+      if (this.busySince.get(groupId) === busyToken) {
+        this.busy.delete(groupId);
+        this.busySince.delete(groupId);
+        this.deps.onState?.();
+        this.scheduleTick();
+        // 生成期间排队的 @/引用消息：现在立刻处理下一条
+        this.drainPendingDirect(groupId);
+      }
     }
   }
 
@@ -2537,6 +2545,17 @@ export class QqBridge {
   private scheduleTick(): void {
     if (!this.running || this.timer !== undefined) return;
     const now = Date.now();
+    // 卡死保护：模型/上游偶发不响应时，busy 不能永久锁住一个群。
+    for (const [stuckId, token] of [...this.busySince]) {
+      const since = Number(token.split('-')[0]);
+      if (Number.isFinite(since) && now - since > 4 * 60_000) {
+        this.log('warn', `群 ${stuckId} 生成超过 4 分钟，强制解锁并继续排队消息`);
+        this.busy.delete(stuckId);
+        this.busySince.delete(stuckId);
+        this.deps.onState?.();
+        this.drainPendingDirect(stuckId);
+      }
+    }
     let next = Number.POSITIVE_INFINITY;
     const proactiveCandidates: Array<{ groupId: string; policy: GroupPolicy; state: GroupState }> = [];
     for (const [groupId, state] of this.states) {
