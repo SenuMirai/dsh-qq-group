@@ -72,6 +72,7 @@ export function parseMessage(
   atAll: boolean;
   hasImage: boolean;
   hasVoice: boolean;
+  redPacket: boolean;
   images: ObSegment[];
   files: ObSegment[];
   forwards: ObSegment[];
@@ -84,6 +85,8 @@ export function parseMessage(
     const atAll = /\[CQ:at,qq=all(?:,[^\]]*)?\]/.test(message);
     const hasImage = /\[CQ:image,/.test(message);
     const hasVoice = /\[CQ:record,/.test(message);
+    const redPacket =
+      /\[CQ:(?:redbag|red_packet|hongbao)/.test(message) || /redpacket|red_packet/i.test(message);
     const replyMatch = /\[CQ:reply,id=([^,\]]+)/.exec(message);
     const atOthers: string[] = [];
     for (const match of message.matchAll(/\[CQ:at,qq=([^,\]]+)/g)) {
@@ -107,6 +110,7 @@ export function parseMessage(
       atAll,
       hasImage,
       hasVoice,
+      redPacket,
       images: [],
       files: [],
       forwards: [],
@@ -123,6 +127,7 @@ export function parseMessage(
   let atSelf = false;
   let atAll = false;
   let hasVoice = false;
+  let redPacket = false;
   const parts: string[] = [];
 
   for (const seg of message) {
@@ -173,10 +178,23 @@ export function parseMessage(
         parts.push(name === '' ? '[文件]' : `[文件：${name}]`);
         break;
       }
-      case 'json':
-      case 'xml':
-        parts.push('[卡片]');
+      case 'redbag':
+      case 'red_packet':
+      case 'hongbao':
+        redPacket = true;
+        parts.push('[红包]');
         break;
+      case 'json':
+      case 'xml': {
+        const card = typeof seg.data.data === 'string' ? seg.data.data : JSON.stringify(seg.data);
+        if (/红包|redpacket|red_packet/i.test(card)) {
+          redPacket = true;
+          parts.push('[红包]');
+        } else {
+          parts.push('[卡片]');
+        }
+        break;
+      }
       case 'poke':
         parts.push('[戳一戳]');
         break;
@@ -206,6 +224,7 @@ export function parseMessage(
     atAll,
     hasImage: images.length > 0,
     hasVoice,
+    redPacket,
     images,
     files,
     forwards,

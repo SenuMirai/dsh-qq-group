@@ -181,6 +181,10 @@ export interface GroupPolicy {
   stickerModelChoice: boolean;
   /** 允许每轮按 imageChance 强制自动发图 */
   stickerAutoChance: boolean;
+  /** 识别到红包时，用模型发一句感谢（当前 NapCat 无领取接口，不能保证抢到） */
+  redPacketEnabled: boolean;
+  /** 识别到红包后感谢的概率（0~1） */
+  redPacketThanksChance: number;
   /** 群友明确要求发图/表情包时，真的发出去的概率（0~1；100% 必发） */
   requestedImageChance: number;
   /** 允许在“爆个照/看看你/看看尾巴”时发鲸鱼娘自拍照 */
@@ -471,6 +475,8 @@ export function defaultGroupPolicy(): GroupPolicy {
     imageChance: 0.2,
     stickerModelChoice: true,
     stickerAutoChance: true,
+    redPacketEnabled: false,
+    redPacketThanksChance: 1,
     requestedImageChance: 0.9,
     selfieEnabled: true,
     selfieOnRequest: true,
@@ -878,6 +884,15 @@ export function normalizeGroupPolicy(raw: unknown, path: string, base = defaultG
       src.stickerModelChoice === undefined ? base.stickerModelChoice : src.stickerModelChoice === true,
     stickerAutoChance:
       src.stickerAutoChance === undefined ? base.stickerAutoChance : src.stickerAutoChance === true,
+    redPacketEnabled:
+      src.redPacketEnabled === undefined ? base.redPacketEnabled : src.redPacketEnabled === true,
+    redPacketThanksChance: num(
+      src.redPacketThanksChance,
+      `${path}.redPacketThanksChance`,
+      base.redPacketThanksChance,
+      0,
+      1,
+    ),
     selfieOnRequest: src.selfieOnRequest === undefined ? base.selfieOnRequest : src.selfieOnRequest === true,
     selfieAutoChance: src.selfieAutoChance === undefined ? base.selfieAutoChance : src.selfieAutoChance === true,
     requestedImageChance: num(

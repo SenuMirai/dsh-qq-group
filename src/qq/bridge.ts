@@ -912,6 +912,7 @@ export class QqBridge {
       files: parsed.files.slice(0, 3),
       forwards: parsed.forwards.slice(0, 1),
       hasVoice: parsed.hasVoice,
+      redPacket: parsed.redPacket,
       ...(parsed.replyToId === undefined ? {} : { replyToId: parsed.replyToId }),
     };
 
@@ -1009,9 +1010,15 @@ export class QqBridge {
       files: parsed.files.slice(0, 3),
       forwards: parsed.forwards.slice(0, 1),
       hasVoice: parsed.hasVoice,
+      redPacket: parsed.redPacket,
       atOthers: parsed.atOthers,
       ...(parsed.replyToId === undefined ? {} : { replyToId: parsed.replyToId }),
     };
+
+    if (message.redPacket === true && policy.redPacketEnabled) {
+      void this.thankRedPacket(groupId, policy, message);
+      return;
+    }
 
     // 群友发表情包/图片：按设置偷偷收进本地素材库（进「她自己的表情包池」）
     const now = Date.now();
@@ -1662,6 +1669,46 @@ export class QqBridge {
    * 回一条消息（@ / 叫名字 / 抽中插话 / 主动开口）。
    * @param mode 'at' | 'chat' | 'proactive'
    */
+  /** 识别到红包：用模型发一句感谢。当前 NapCat 没有领取接口，不伪造“抢到了”。 */
+  private async thankRedPacket(
+    groupId: string,
+    policy: GroupPolicy,
+    message: GroupMessage,
+  ): Promise<void> {
+    if (!policy.redPacketEnabled) return;
+    if (policy.redPacketThanksChance <= 0 || Math.random() >= policy.redPacketThanksChance) return;
+    try {
+      const system = [
+        `你是「${this.config.selfName}」，正在 QQ 群里聊天。`,
+        '群里有人发了一个红包。用一句自然、口语的中文感谢对方，20 字以内。',
+        '不要声称“抢到了/领到了/手气最佳”，因为你没有被确认领到；不要提金额、AI、插件。',
+        '只输出这一句话，不要引号、不要解释。',
+      ].join('\n');
+      const result = await this.llm.chat(
+        [
+          { role: 'system', content: system },
+          { role: 'user', content: `${message.name} 发了一个红包。` },
+        ],
+        { purpose: 'redpacket', groupId, maxTokens: 60, timeoutMs: 15_000 },
+      );
+      const text = result.ok
+        ? result.text.replace(/^["“]|["”]$/g, '').split(/\r?\n/)[0]!.trim().slice(0, 80)
+        : '';
+      const thanks = text === '' ? `谢谢${message.name}的红包！` : text;
+      const at =
+        /^\d{5,12}$/.test(message.userId) && message.userId !== this.client?.selfQq
+          ? [{ type: 'at' as const, data: { qq: message.userId } }]
+          : [];
+      const sent = await this.sendSegments(groupId, [...at, { type: 'text', data: { text: thanks } }]);
+      if (sent.ok) {
+        this.appendAssistant(groupId, thanks, Date.now());
+        this.log('info', `群 ${groupId} 识别到红包，已发感谢（未领取：NapCat 无领取接口）`);
+      }
+    } catch (e) {
+      this.log('warn', `红包感谢失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   private async replyTo(
     groupId: string,
     policy: GroupPolicy,

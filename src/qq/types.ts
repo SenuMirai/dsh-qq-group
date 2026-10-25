@@ -95,6 +95,8 @@ export interface GroupMessage {
   forwards?: ObSegment[];
   /** 是否包含语音段（QQ 语音消息 → silk，需要 NapCat 转码） */
   hasVoice: boolean;
+  /** 是否包含红包卡片（当前只能识别/感谢，不能保证领取） */
+  redPacket?: boolean;
 }
 
 /** 一次要发出的动作（编排层产出，发送层执行） */
