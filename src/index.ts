@@ -2088,7 +2088,12 @@ export function apply(ctx: any): void {
           });
         }
         if (method !== 'POST') return send(405, { error: 'method not allowed' });
-        const payload = (body ?? {}) as { action?: unknown; content?: unknown; tid?: unknown; ugcRight?: unknown };
+        const payload = (JSON.parse(body || 'null') as {
+          action?: unknown;
+          content?: unknown;
+          tid?: unknown;
+          ugcRight?: unknown;
+        } | null) ?? {};
         const action = typeof payload.action === 'string' ? payload.action : '';
 
         if (action === 'generate') {
