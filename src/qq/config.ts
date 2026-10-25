@@ -66,8 +66,8 @@ export interface ProactiveConfig {
   ownerMentionEnabled: boolean;
   /** 每次主动开口时选择 @主人的概率（0~1） */
   ownerMentionChance: number;
-  /** 每天第一次符合条件时保底 @ 一次（不受概率影响） */
-  ownerMentionGuarantee: boolean;
+  /** 每天至少 @ 几次；当天未达到这个次数时不再过概率。0 = 只按概率 */
+  ownerMentionMinPerDay: number;
   /** 两次 @主人 的最小间隔（毫秒） */
   ownerMentionCooldownMs: number;
   /** 每天最多 @主人 几次（0 = 不限） */
@@ -467,7 +467,7 @@ export function defaultGroupPolicy(): GroupPolicy {
       trial: true,
       ownerMentionEnabled: false,
       ownerMentionChance: 0.25,
-      ownerMentionGuarantee: true,
+      ownerMentionMinPerDay: 1,
       ownerMentionCooldownMs: 45 * 60_000,
       ownerMentionMaxPerDay: 3,
     },
@@ -852,7 +852,13 @@ export function normalizeGroupPolicy(raw: unknown, path: string, base = defaultG
         pro.ownerMentionEnabled === undefined
           ? base.proactive.ownerMentionEnabled
           : pro.ownerMentionEnabled === true,
-      ownerMentionGuarantee: pro.ownerMentionGuarantee !== false,
+      ownerMentionMinPerDay: num(
+        pro.ownerMentionMinPerDay,
+        `${path}.proactive.ownerMentionMinPerDay`,
+        base.proactive.ownerMentionMinPerDay,
+        0,
+        50,
+      ),
       ownerMentionChance: num(
         pro.ownerMentionChance,
         `${path}.proactive.ownerMentionChance`,

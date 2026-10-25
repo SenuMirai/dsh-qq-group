@@ -2665,7 +2665,8 @@ export class QqBridge {
     if (p.ownerMentionMaxPerDay > 0 && state.ownerMentionDay.count >= p.ownerMentionMaxPerDay) {
       return false;
     }
-    const guaranteed = p.ownerMentionGuarantee === true && state.ownerMentionDay.count === 0;
+    const minPerDay = Math.max(0, Math.round(p.ownerMentionMinPerDay ?? 0));
+    const guaranteed = state.ownerMentionDay.count < minPerDay;
     if (!guaranteed && Math.random() >= p.ownerMentionChance) return false;
     state.lastOwnerMentionAt = now;
     state.ownerMentionDay.count += 1;
