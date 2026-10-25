@@ -1675,6 +1675,8 @@ export class QqBridge {
       return;
     }
     const state = this.stateOf(groupId);
+    // 主动 @主人：冷场开口时由外层传入；普通接话要等真正通过限流后再掷骰。
+    let mentionOwner = ownerMention;
     // @ / 叫名字 / 引用她 / 5 分钟内接着聊：直接对话。
     // 直接对话绕过 45 秒冷却，也不占普通插话的 10 分钟额度；
     // 但受自己的直接回复上限（默认 20/10 分钟）约束。
@@ -1684,6 +1686,14 @@ export class QqBridge {
     if (!verdict.allowed) {
       this.log('info', `群 ${groupId} 触发${mode}，但被${verdict.reason === 'cooldown' ? '冷却' : '频率限制'}挡住（还要等 ${Math.ceil((verdict.waitMs ?? 0) / 1000)} 秒）`);
       return;
+    }
+    if (
+      !mentionOwner &&
+      (mode === 'chat' || mode === 'proactive') &&
+      !isPrivateKey(groupId) &&
+      (message === undefined || message.userId !== this.config.ownerQq)
+    ) {
+      mentionOwner = this.shouldMentionOwner(policy, state, now);
     }
 
     this.busy.add(groupId);
@@ -1877,7 +1887,7 @@ export class QqBridge {
         transcript: transcript(turns, this.config.selfName, now),
         ...(message === undefined || message.text === '' ? {} : { incoming: `${message.name}：${message.text}` }),
         burstRange: [policy.burst.min, policy.burst.max],
-        allowVoice: !ownerMention && (policy.voiceChance > 0 || policy.proactiveVoiceChance > 0 || policy.requestedVoiceChance > 0),
+        allowVoice: !mentionOwner && (policy.voiceChance > 0 || policy.proactiveVoiceChance > 0 || policy.requestedVoiceChance > 0),
         allowSing: policy.singOnRequest,
         voiceRequested: voiceRequest,
         singRequested: singRequest,
@@ -1888,7 +1898,7 @@ export class QqBridge {
         selfieRequested: selfieRequest,
         selfieAvailable,
         ownerQq: this.config.ownerQq,
-        ownerMention,
+        ownerMention: mentionOwner,
         ownerPriorityPrompt: this.deps.ownerPriority?.(),
         ...(this.deps.stickers === undefined
           ? {}
@@ -1930,7 +1940,7 @@ export class QqBridge {
 
       let plan = parseReplyPlanSafe(result.text, policy);
       // 这次是主动 @主人：用文字说，避免语音抢先、@ 丢失
-      if (ownerMention) plan = { ...plan, action: 'text' };
+      if (mentionOwner) plan = { ...plan, action: 'text' };
       // 明确要歌：强制 singing 分支，并按 requestedSingChance 掷骰
       const requestedSong = singRequest && message !== undefined ? songTitleFrom(message.text) : undefined;
       if (singRequest) {
@@ -1966,7 +1976,7 @@ export class QqBridge {
       // 被明确要求发语音时用 requestedVoiceChance；否则用普通 voiceChance。
       const spokenText = plan.messages.join('，');
       const voiceEligible =
-        !ownerMention &&
+        !mentionOwner &&
         !imageSendRequest &&
         !selfieRequest &&
         !singRequest &&
@@ -2035,7 +2045,7 @@ export class QqBridge {
         message.hasVoice !== true
           ? message.messageId
           : undefined;
-      let sentCount = await this.deliver(groupId, policy, plan, now, mode, imageSendRequest, selfieRequest, undefined, quoteTarget, plan.emotion, ownerMention);
+      let sentCount = await this.deliver(groupId, policy, plan, now, mode, imageSendRequest, selfieRequest, undefined, quoteTarget, plan.emotion, mentionOwner);
       if (sentCount > 0) {
         const stat = this.statOf(groupId);
         stat.replied += sentCount;
@@ -2434,7 +2444,7 @@ export class QqBridge {
     if (Math.random() >= p.ownerMentionChance) return false;
     state.lastOwnerMentionAt = now;
     state.ownerMentionDay.count += 1;
-    this.log('info', `群 ${state.groupId} 本次主动开口将 @主人（今日第 ${state.ownerMentionDay.count} 次）`);
+    this.log('info', `群 ${state.groupId} 本次开口将 @主人（今日第 ${state.ownerMentionDay.count} 次）`);
     return true;
   }
 
@@ -2524,14 +2534,12 @@ export class QqBridge {
           this.log('info', `群 ${groupId} 主动搭话命中，但试运行开着（掷 ${roll.roll.toFixed(1)} / 命中线 ${lineText}），不发送`);
         } else {
           this.log('info', `群 ${groupId} 主动搭话命中：掷 ${roll.roll.toFixed(1)} / 命中线 ${lineText}`);
-          const ownerMention = this.shouldMentionOwner(policy, state, now);
-          void this.replyTo(groupId, policy, undefined, 'proactive', now, ownerMention).catch((e) => {
+          void this.replyTo(groupId, policy, undefined, 'proactive', now).catch((e) => {
             this.recordError(`主动开口异常：${e instanceof Error ? e.message : String(e)}`);
           });
         }
       } else {
-        const ownerMention = this.shouldMentionOwner(policy, state, now);
-        void this.replyTo(groupId, policy, undefined, 'proactive', now, ownerMention).catch((e) => {
+        void this.replyTo(groupId, policy, undefined, 'proactive', now).catch((e) => {
           this.recordError(`主动开口异常：${e instanceof Error ? e.message : String(e)}`);
         });
       }
