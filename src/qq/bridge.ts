@@ -1049,6 +1049,19 @@ export class QqBridge {
       ...(parsed.replyToId === undefined ? {} : { replyToId: parsed.replyToId }),
     };
 
+    if (this.isOwner(userId)) {
+      const links = (message.text.match(/https?:\/\/[^\s，。！？、）)】]+/gu) ?? []).slice(0, 5);
+      for (const link of links) {
+        this.addMemoryV3(groupId, {
+          text: `主人提供的链接：${link}`,
+          category: 'stable_profile',
+          importance: 0.95,
+          factKey: `owner-link:${link}`,
+        });
+      }
+      if (links.length > 0) this.log('info', `群 ${groupId} 记住主人提供的链接 ${links.length} 条`);
+    }
+
     if (message.redPacket === true && policy.redPacketEnabled) {
       void this.thankRedPacket(groupId, policy, message);
       return;
