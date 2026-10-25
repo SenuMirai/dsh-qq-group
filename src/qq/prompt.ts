@@ -78,6 +78,8 @@ export interface PromptInput {
   ownerPriorityPrompt?: string;
   /** 这次主动开口是专门 @主人（仅群聊） */
   ownerMention?: boolean;
+  /** 最近发过的 QQ空间动态（本地记录） */
+  qzonePosts?: string[];
 }
 
 /** 场合不同，任务不同 */
@@ -151,6 +153,16 @@ export function groupSystemPrompt(input: PromptInput): string {
       custom !== ''
         ? ['', '【主人优先级（自定义）】', custom.replaceAll('{{ownerQq}}', input.ownerQq)].join('\n')
         : ['', '【主人优先级】', DEFAULT_OWNER_PRIORITY.replaceAll('{{ownerQq}}', input.ownerQq)].join('\n'),
+    );
+  }
+  if (input.qzonePosts !== undefined && input.qzonePosts.length > 0) {
+    parts.push(
+      [
+        '',
+        '【你最近发过的 QQ空间动态（本地记录）】',
+        ...input.qzonePosts.map((post) => `- ${post}`),
+        '有人问你空间发了什么时，按这些回答；不要编造没发过的内容。',
+      ].join('\n'),
     );
   }
   if (input.ownerMention === true) {

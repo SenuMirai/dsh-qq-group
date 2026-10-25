@@ -154,6 +154,8 @@ export interface BridgeDeps {
   rules?: (userId: string) => ScoreRules;
   /** 是否让模型判断「在怼她」（扣好感） */
   hostilityJudge?: () => boolean;
+  /** 最近发过的 QQ空间动态（本地记录，供群聊回答“你空间发了什么”） */
+  qzoneRecent?: (limit: number) => Array<{ content: string; ts: number }>;
 }
 
 /** 画像操作的桥接接口（实现见 plugin index） */
@@ -323,18 +325,47 @@ export class QqBridge {
     return this.client !== undefined;
   }
 
+  /** QQ空间：取 Qzone cookies / bkn，供远程读取说说使用 */
+  async qzoneCookies(): Promise<{
+    ok: boolean;
+    cookies?: string;
+    bkn?: string;
+    message?: string;
+  }> {
+    if (this.client === undefined) return { ok: false, message: 'QQ 连接未建立' };
+    try {
+      const response = await this.client.call('get_cookies', { domain: 'qzone.qq.com' });
+      if (response.status !== 'ok') return { ok: false, message: response.message || 'get_cookies 失败' };
+      const data = response.data as { cookies?: unknown; bkn?: unknown } | undefined;
+      const cookies = typeof data?.cookies === 'string' ? data.cookies : '';
+      const bkn = typeof data?.bkn === 'string' ? data.bkn : '';
+      if (cookies === '') return { ok: false, message: 'Qzone cookies 为空' };
+      return { ok: true, cookies, bkn };
+    } catch (e) {
+      return { ok: false, message: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
   /** QQ空间：发表说说（NapCat 扩展接口 send_qzone_msg） */
   async qzonePublish(
     content: string,
     ugcRight: number,
+    images: string[] = [],
   ): Promise<{ ok: boolean; tid?: string; message?: string }> {
     if (this.client === undefined) return { ok: false, message: 'QQ 连接未建立' };
     const text = content.trim();
     if (text === '') return { ok: false, message: '说说正文为空' };
     try {
+      const pictures = images
+        .filter((p) => typeof p === 'string' && p.trim() !== '')
+        .slice(0, 9)
+        .map((p) =>
+          /^(?:https?|file|base64):/i.test(p) ? p : `file:///${p.replace(/\\/g, '/').replace(/^\/+/, '')}`,
+        );
       const response = await this.client.call('send_qzone_msg', {
         content: text.slice(0, 2000),
         ugc_right: ugcRight,
+        ...(pictures.length > 0 ? { images: pictures } : {}),
       });
       if (response.status !== 'ok') return { ok: false, message: response.message || 'send_qzone_msg 失败' };
       const data = response.data as { tid?: unknown } | undefined;
@@ -1947,6 +1978,13 @@ export class QqBridge {
         ownerQq: this.config.ownerQq,
         ownerMention: mentionOwner,
         ownerPriorityPrompt: this.deps.ownerPriority?.(),
+        ...(/空间|说说|动态|qzone/i.test(message?.text ?? '') && this.deps.qzoneRecent !== undefined
+          ? {
+              qzonePosts: this.deps.qzoneRecent(5).map(
+                (post) => `${new Date(post.ts).toLocaleDateString('zh-CN')}：${post.content.slice(0, 240)}`,
+              ),
+            }
+          : {}),
         ...(this.deps.stickers === undefined
           ? {}
           : {
