@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 1.23.3 — provider 别名纠正
+
+- 旧配置里的备用模型 provider `workbuddy-ai` 自动纠正为实际存在的 `workbuddy`。
+- 读取设置和保存设置两条路径都会纠正，避免备用模型静默失效。
+- 模型 `qoder-global/dfmodel` 当前会返回空文本；主模型已切到 `deepseek-official/deepseek-flash`，备用 `workbuddy/deepseek-v4.1-flash`，两者均通过自检。
+
 ## 1.23.2 — QQ空间请求体修复
 
 - 修复 `/qzone` POST 把原始字符串当对象用，导致 `action` 永远 undefined、所有操作返回“未知 action”。
