@@ -62,6 +62,14 @@ export interface ProactiveConfig {
   cooldownMs: number;
   /** 试运行：只记录，不实际发送 */
   trial: boolean;
+  /** 主动开口时偶尔 @主人（仅群聊） */
+  ownerMentionEnabled: boolean;
+  /** 每次主动开口时选择 @主人的概率（0~1） */
+  ownerMentionChance: number;
+  /** 两次 @主人 的最小间隔（毫秒） */
+  ownerMentionCooldownMs: number;
+  /** 每天最多 @主人 几次（0 = 不限） */
+  ownerMentionMaxPerDay: number;
 }
 
 /** 单个群的策略 */
@@ -340,6 +348,21 @@ export interface QqConfig {
   groups: Record<string, GroupPolicy>;
   /** 没列出的群怎么处理 */
   defaultGroup: GroupPolicy;
+  /**
+   * 私聊策略表（key = QQ 号）。
+   *
+   * ── 和群聊同一套策略、不同一份数据 ──
+   * 私聊复用 `GroupPolicy` 的全部字段（回复频率、记忆上限、心情、语音……），
+   * 因为「一个人跟她单聊」在行为上和「一个群里说话」没有本质区别，多一套并行类型
+   * 只会让两边越改越不像。真正要分开的是**数据**：记忆/画像/心情/日记都按会话 key 存，
+   * 私聊的 key 是 `p:<QQ号>`，与群号不在同一个命名空间，天然互不串味。
+   *
+   * 默认**不加人就不理**：没列在这里的 QQ 私聊一律不回（也不记账），
+   * 与群聊「没列出的群不接」完全一致。
+   */
+  privates: Record<string, GroupPolicy>;
+  /** 没列出的私聊怎么处理（默认关闭） */
+  defaultPrivate: GroupPolicy;
   llm: LlmConfig;
   tts: QqTtsConfig;
   sing: QqSingConfig;
@@ -432,6 +455,10 @@ export function defaultGroupPolicy(): GroupPolicy {
       missBonusMax: 40,
       cooldownMs: 20 * 60_000,
       trial: true,
+      ownerMentionEnabled: false,
+      ownerMentionChance: 0.25,
+      ownerMentionCooldownMs: 45 * 60_000,
+      ownerMentionMaxPerDay: 3,
     },
     voiceChance: 0.25,
     requestedVoiceChance: 1,
@@ -452,6 +479,37 @@ export function defaultGroupPolicy(): GroupPolicy {
     selfieKeywords: ['尾巴', '耳朵', '鱼尾', '头发', '脸', '眼睛', '衣服', '裙子', '自拍', '长什么样', '长啥样'],
     imageView: 'custom',
     imageViewModes: ['at'],
+  };
+}
+
+/**
+ * 默认的私聊策略。
+ *
+ * ── 为什么和群聊的默认值不一样 ──
+ * 私聊是一对一，没人会在旁边插话，所以「怕吵到群友」的那些限制（冷场主动开口、
+ * 10 分钟限流）在这里没有意义，反而应该更放得开：
+ *   - **冷场主动开口默认关**：主人没说话时她突然发消息，在群里叫热闹，在私聊里叫惊悚。
+ *     想让她主动找主人说话，那是另一个显式打开的开关，不该是默认行为。
+ *   - **回复不受 10 分钟额度限制**：一对一本来就可以连着聊几十轮。
+ *   - 语音/图保留，但自动概率比群里低——私聊里突然发语音同样容易吓人。
+ */
+export function defaultPrivatePolicy(): GroupPolicy {
+  return {
+    ...defaultGroupPolicy(),
+    enabled: false,
+    replyOnAt: true,
+    replyOnName: true,
+    activeChat: true,
+    cooldownMs: 0,
+    maxRepliesPer10Min: 0,
+    maxDirectRepliesPer10Min: 0,
+    proactive: { ...defaultGroupPolicy().proactive, enabled: false, trial: true },
+    voiceChance: 0.15,
+    proactiveVoiceChance: 0,
+    imageEnabled: true,
+    imageChance: 0.08,
+    selfieEnabled: true,
+    selfieAutoChance: false,
   };
 }
 
@@ -496,6 +554,8 @@ export function defaultConfig(): QqConfig {
     ownerQq: '',
     groups: {},
     defaultGroup: defaultGroupPolicy(),
+    privates: {},
+    defaultPrivate: defaultPrivatePolicy(),
     llm: {
       baseUrl: 'https://api.deepseek.com/v1',
       apiKey: '',
@@ -773,6 +833,31 @@ export function normalizeGroupPolicy(raw: unknown, path: string, base = defaultG
       missBonusMax: num(pro.missBonusMax, `${path}.proactive.missBonusMax`, base.proactive.missBonusMax, 0, 100),
       cooldownMs: num(pro.cooldownMs, `${path}.proactive.cooldownMs`, base.proactive.cooldownMs, 0, 24 * 3600_000),
       trial: pro.trial !== false,
+      ownerMentionEnabled:
+        pro.ownerMentionEnabled === undefined
+          ? base.proactive.ownerMentionEnabled
+          : pro.ownerMentionEnabled === true,
+      ownerMentionChance: num(
+        pro.ownerMentionChance,
+        `${path}.proactive.ownerMentionChance`,
+        base.proactive.ownerMentionChance,
+        0,
+        1,
+      ),
+      ownerMentionCooldownMs: num(
+        pro.ownerMentionCooldownMs,
+        `${path}.proactive.ownerMentionCooldownMs`,
+        base.proactive.ownerMentionCooldownMs,
+        0,
+        7 * 24 * 3600_000,
+      ),
+      ownerMentionMaxPerDay: num(
+        pro.ownerMentionMaxPerDay,
+        `${path}.proactive.ownerMentionMaxPerDay`,
+        base.proactive.ownerMentionMaxPerDay,
+        0,
+        100,
+      ),
     },
     voiceChance: num(src.voiceChance, `${path}.voiceChance`, base.voiceChance, 0, 1),
     requestedVoiceChance: num(src.requestedVoiceChance, `${path}.requestedVoiceChance`, base.requestedVoiceChance, 0, 1),
@@ -866,6 +951,18 @@ export function normalizeConfig(raw: unknown): QqConfig {
     }
   }
 
+  const privatesRaw = src.privates;
+  const privates: Record<string, GroupPolicy> = {};
+  if (privatesRaw !== undefined && privatesRaw !== null) {
+    if (typeof privatesRaw !== 'object' || Array.isArray(privatesRaw)) {
+      throw new ConfigError('privates', '对象（key = QQ 号）', privatesRaw);
+    }
+    for (const [qq, value] of Object.entries(privatesRaw as Record<string, unknown>)) {
+      if (!/^\d{5,12}$/.test(qq)) throw new ConfigError(`privates.${qq}`, '5~12 位数字 QQ 号', qq);
+      privates[qq] = normalizeGroupPolicy(value, `privates.${qq}`, defaultPrivatePolicy());
+    }
+  }
+
   const llmSrc = (src.llm ?? {}) as Record<string, unknown>;
   const ttsSrc = (src.tts ?? {}) as Record<string, unknown>;
   const singSrc = (src.sing ?? {}) as Record<string, unknown>;
@@ -881,6 +978,8 @@ export function normalizeConfig(raw: unknown): QqConfig {
     ownerQq: str(src.ownerQq, 'ownerQq', base.ownerQq),
     groups,
     defaultGroup: normalizeGroupPolicy(src.defaultGroup, 'defaultGroup', base.defaultGroup),
+    privates,
+    defaultPrivate: normalizeGroupPolicy(src.defaultPrivate, 'defaultPrivate', base.defaultPrivate),
     llm: {
       baseUrl: str(llmSrc.baseUrl, 'llm.baseUrl', base.llm.baseUrl),
       apiKey: str(llmSrc.apiKey, 'llm.apiKey', base.llm.apiKey),
@@ -946,4 +1045,30 @@ export function clonePolicy(policy: GroupPolicy): GroupPolicy {
 /** 某个群的最终策略：显式配置优先，否则用 defaultGroup（但 defaultGroup 默认是关的） */
 export function policyFor(config: QqConfig, groupId: string): GroupPolicy {
   return config.groups[groupId] ?? config.defaultGroup;
+}
+
+/**
+ * 会话 key 的命名空间。
+ *
+ * ── 为什么私聊要加前缀而不是直接用 QQ 号 ──
+ * 记忆、画像、心情、日记全都只认一个字符串 key。如果私聊直接用 QQ 号，那么
+ * 「QQ 号 809773499 的群」和「QQ 号 809773499 的人」会撞 key——群聊记忆会串进私聊，
+ * 画像会互相覆盖，而这种 bug 一旦写进去几乎不可能事后发现。前缀把两个空间隔开，
+ * 代价只是所有存盘的 key 长一点。
+ */
+export const PRIVATE_KEY_PREFIX = 'p:';
+
+/** 一段私聊在各类存储里的 key */
+export function privateKey(userId: string): string {
+  return `${PRIVATE_KEY_PREFIX}${userId}`;
+}
+
+/** 从会话 key 还原 QQ 号；不是私聊 key 就返回 undefined */
+export function privateUserId(key: string): string | undefined {
+  return key.startsWith(PRIVATE_KEY_PREFIX) ? key.slice(PRIVATE_KEY_PREFIX.length) : undefined;
+}
+
+/** 某个人的私聊策略：显式配置优先，否则用 defaultPrivate（默认是关的） */
+export function privatePolicyFor(config: QqConfig, userId: string): GroupPolicy {
+  return config.privates[userId] ?? config.defaultPrivate;
 }

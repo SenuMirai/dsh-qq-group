@@ -30,7 +30,10 @@
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 
-import { policyFor, type GroupPolicy, type QqConfig } from './config';
+import { PRIVATE_KEY_PREFIX, policyFor, privateKey, privatePolicyFor, type GroupPolicy, type QqConfig } from './config';
+
+/** 会话 key 是不是私聊（用于在少数必须区分的地方做分派） */
+const isPrivateKey = (key: string): boolean => key.startsWith(PRIVATE_KEY_PREFIX);
 import { createOpenAiClient, parseReplyPlan, type ChatClient, type ChatImage } from './llm';
 import {
   applyMoodJudgement,
@@ -87,6 +90,7 @@ import {
   classifyTrigger,
   clearChatWindow,
   createGroupState,
+  dayKey,
   nextWakeup,
   noteSelfSpoke,
   observeHuman,
@@ -503,6 +507,8 @@ export class QqBridge {
       proactiveMisses?: number;
       proactiveTrial?: boolean;
       enabled: boolean;
+      /** 'private' = 这段是私聊（groupId 里装的是 p:<QQ号>） */
+      kind?: 'private';
     }>;
     lastError?: string;
   } {
@@ -518,6 +524,7 @@ export class QqBridge {
       proactiveMisses: stat.state.proactiveMisses,
       proactiveTrial: this.policyOf(stat.groupId).proactive.trial,
       enabled: this.policyOf(stat.groupId).enabled,
+      ...(isPrivateKey(stat.groupId) ? { kind: 'private' as const } : {}),
     }));
     return {
       running: this.running,
@@ -621,10 +628,12 @@ export class QqBridge {
    */
   private seedGroupStates(): void {
     const now = Date.now();
-    for (const [groupId, policy] of Object.entries(this.config.groups)) {
+    // 群与私聊都要恢复「最后有人说话的时间」，否则重启后冷场计时从零开始。
+    // 私聊默认不主动开口（defaultPrivatePolicy 里 proactive.enabled=false），
+    // 所以这里即使排了 nextProactiveAt 也不会真的发出去。
+    for (const [groupId, group] of Object.entries(this.memory.groups)) {
+      const policy = this.policyOf(groupId);
       if (!policy.enabled) continue;
-      const group = this.memory.groups[groupId];
-      if (group === undefined) continue;
       const lastUser = [...group.turns].reverse().find((turn) => turn.role === 'user');
       const lastSelf = [...group.turns].reverse().find((turn) => turn.role === 'assistant');
       const state = this.stateOf(groupId);
@@ -724,14 +733,20 @@ export class QqBridge {
       case 'status': {
         const snap = this.snapshot();
         const link = snap.link as { status?: string; selfId?: string };
+        const groups = snap.groups.filter((item) => item.kind !== 'private');
+        const privates = snap.groups.filter((item) => item.kind === 'private');
         const lines = [
           `连接：${link.status ?? '未知'}${link.selfId !== undefined && link.selfId !== '' ? `（${link.selfId}）` : ''}`,
           `模型：${snap.llm}`,
           `静音：${snap.muted ? '是' : '否'}`,
-          `群数：${snap.groups.length}`,
+          `群数：${groups.length}　私聊：${privates.length}`,
         ];
-        for (const group of snap.groups.slice(0, 10)) {
+        for (const group of groups.slice(0, 10)) {
           lines.push(`· ${group.groupId}${group.name === undefined ? '' : ` ${group.name}`}：收 ${group.received} / 回 ${group.replied}${group.enabled ? '' : '（关闭）'}`);
+        }
+        for (const item of privates.slice(0, 10)) {
+          const qq = item.groupId.slice(PRIVATE_KEY_PREFIX.length);
+          lines.push(`· 私聊 ${qq}：收 ${item.received} / 回 ${item.replied}${item.enabled ? '' : '（关闭）'}`);
         }
         if (snap.lastError !== undefined) lines.push(`最后错误：${snap.lastError}`);
         return lines.join('\n');
@@ -756,24 +771,28 @@ export class QqBridge {
         this.muted = false;
         return '已取消静音';
       case 'pause': {
-        const policy = this.policyOf(command.groupId);
-        policy.enabled = false;
-        this.config.groups[command.groupId] = policy;
-        return `群 ${command.groupId} 已暂停（仅本次运行有效，要永久生效请改 qq.json）`;
+        const target = this.resolveTarget(command.groupId);
+        if (target === undefined) return `没有 ${command.groupId} 这个群或私聊`;
+        target.policy.enabled = false;
+        return `${target.label} 已暂停（仅本次运行有效，要永久生效请改 qq.json）`;
       }
       case 'resume': {
-        const policy = this.policyOf(command.groupId);
-        policy.enabled = true;
-        this.config.groups[command.groupId] = policy;
-        return `群 ${command.groupId} 已恢复`;
+        const target = this.resolveTarget(command.groupId);
+        if (target === undefined) return `没有 ${command.groupId} 这个群或私聊`;
+        target.policy.enabled = true;
+        return `${target.label} 已恢复`;
       }
       case 'say': {
-        const result = await this.sendSegments(command.groupId, [{ type: 'text', data: { text: command.text } }]);
-        return result.ok ? `已发到群 ${command.groupId}` : `发送失败：${result.message}`;
+        const target = this.resolveTarget(command.groupId);
+        if (target === undefined) return `没有 ${command.groupId} 这个群或私聊`;
+        const result = await this.sendSegments(target.key, [{ type: 'text', data: { text: command.text } }]);
+        return result.ok ? `已发到${target.label}` : `发送失败：${result.message}`;
       }
       case 'sing': {
-        const result = await this.singInGroup(command.groupId, command.song);
-        return result.ok ? `已在群 ${command.groupId} 唱完` : `唱歌失败：${result.message}`;
+        const target = this.resolveTarget(command.groupId);
+        if (target === undefined) return `没有 ${command.groupId} 这个群或私聊`;
+        const result = await this.singInGroup(target.key, command.song);
+        return result.ok ? `已在${target.label}唱完` : `唱歌失败：${result.message}`;
       }
       case 'help':
         return ownerHelp(this.config.selfName);
@@ -782,6 +801,25 @@ export class QqBridge {
       default:
         return '未知指令';
     }
+  }
+
+  /**
+   * 把主人指令里的号码解析成「群」或「私聊」。
+   *
+   * 为什么需要：`说 809773499 你好` 里的号码可能是群号，也可能是私聊号（`privates` 的 key），
+   * 两者都是 5~12 位数字、格式上分不出来。所以先查群表，再查私聊表；
+   * 两边都没有就返回 undefined，让调用方明确报错，而不是默默发到一个不存在的会话。
+   */
+  private resolveTarget(id: string): { key: string; policy: GroupPolicy; label: string } | undefined {
+    const groupPolicy = this.config.groups[id];
+    if (groupPolicy !== undefined) {
+      return { key: id, policy: groupPolicy, label: `群 ${id}` };
+    }
+    const privatePolicy = this.config.privates[id];
+    if (privatePolicy !== undefined) {
+      return { key: privateKey(id), policy: privatePolicy, label: `私聊 ${id}` };
+    }
+    return undefined;
   }
 
   /** 事件入口（WS 上报与 HTTP POST 上报共用） */
@@ -797,23 +835,117 @@ export class QqBridge {
     }
   }
 
-  /** 私聊：只认主人，其它人一律不理（也不回复，避免被当成客服） */
+  /**
+   * 私聊入口。
+   *
+   * ── 三种私聊，三种处置 ──
+   * 1. **主人**：先当指令解析（状态/暂停/说/唱…），不是指令就当普通聊天聊下去。
+   * 2. **列表里加了的人**（`privates` 里 enabled）：和群聊完全同一套流程——记忆、画像、
+   *    心情、日记都按 `p:<QQ号>` 单独存一份，互不影响。
+   * 3. **没加的人**：一律不理，也不记账。这跟群里「没列的群不接」是同一条规则。
+   *
+   * ── 为什么主人也要能当普通聊天 ──
+   * 之前这里只解析指令，主人说「今天好累」会被回一句「没听懂这条指令」——那不像她，
+   * 像台没听懂话的机器。现在指令命中就执行，没命中就走聊天。
+   */
   private async handlePrivateMessage(event: ObPrivateMessageEvent): Promise<void> {
     const userId = asId(event.user_id);
     const selfId = this.client?.selfQq ?? '';
-    if (userId === selfId) return;
-    if (!this.isOwner(userId)) {
-      this.log('debug', `忽略非主人私聊 from=${userId}`);
+    if (userId === '' || userId === selfId) return;
+
+    const isOwner = this.isOwner(userId);
+    const policy = privatePolicyFor(this.config, userId);
+    // 主人不受「要不要加进列表」限制；其他人必须显式加进来
+    if (!isOwner && !policy.enabled) {
+      this.log('debug', `忽略未授权私聊 from=${userId}`);
       return;
     }
+
     const parsed = parseMessage(event.message, selfId);
-    if (parsed.text.trim() === '') return;
-    try {
-      const reply = await this.handleOwnerMessage(parsed.text);
-      await this.sendPrivate(userId, [{ type: 'text', data: { text: reply } }]);
-    } catch (e) {
-      this.recordError(e instanceof Error ? e.message : String(e));
+    const text = parsed.text.trim();
+
+    // 主人：先试指令。指令是「控制台」，命中就该立刻回，不该进聊天流程。
+    if (isOwner && text !== '') {
+      const command = parseOwnerCommand(text);
+      if (command.kind !== 'unknown') {
+        try {
+          const reply = await this.handleOwnerMessage(text);
+          await this.sendPrivate(userId, [{ type: 'text', data: { text: reply } }]);
+        } catch (e) {
+          this.recordError(e instanceof Error ? e.message : String(e));
+        }
+        return;
+      }
     }
+
+    // 图片/语音/文件这些「没有文字也算消息」的部分也要能进来：
+    // 主人发张图不说话、发条语音，都应该有反应，不能因为 text 空就丢掉。
+    const hasPayload = text !== '' || parsed.hasImage || parsed.hasVoice || parsed.files.length > 0;
+    if (!hasPayload) return;
+
+    if (!policy.enabled && !isOwner) return;
+    // 主人即使没把策略打开，也该能聊；用私聊默认策略兜底
+    const effective = isOwner && !policy.enabled ? { ...policy, enabled: true } : policy;
+    if (!effective.enabled) {
+      this.log('debug', `私聊 ${userId} 的策略未启用，不理`);
+      return;
+    }
+
+    const sessionKey = privateKey(userId);
+    const sender = event.sender ?? {};
+    const name = String(sender.card !== undefined && sender.card !== '' ? sender.card : (sender.nickname ?? userId));
+    const message: GroupMessage = {
+      // 私聊在内部复用群消息结构：groupId 字段装的是会话 key（p:<QQ号>），
+      // 下游所有按 key 存的东西（记忆/画像/心情/日记）因此自动分开。
+      groupId: sessionKey,
+      userId,
+      name,
+      role: isOwner ? 'owner' : 'member',
+      text: parsed.text,
+      atSelf: true,
+      callSelf: parsed.text.includes(this.config.selfName),
+      atAll: false,
+      at: (event.time === undefined ? Date.now() : Number(event.time) * 1000) || Date.now(),
+      messageId: asId(event.message_id),
+      hasImage: parsed.hasImage,
+      images: parsed.images.slice(0, 4),
+      files: parsed.files.slice(0, 3),
+      forwards: parsed.forwards.slice(0, 1),
+      hasVoice: parsed.hasVoice,
+      ...(parsed.replyToId === undefined ? {} : { replyToId: parsed.replyToId }),
+    };
+
+    const now = Date.now();
+    const state = this.stateOf(sessionKey);
+    const stat = this.statOf(sessionKey);
+    stat.received += 1;
+    stat.lastMessageAt = now;
+    this.lastInboundId.set(sessionKey, message.messageId);
+    this.lastSpeaker.set(sessionKey, userId);
+
+    if (message.text.trim() !== '') {
+      this.appendMemoryTurn(sessionKey, { role: 'user', name, text: message.text.slice(0, 500), ts: now });
+    }
+    observeHuman(state, effective, now);
+    state.lastDirectAt = now;
+    state.lastDirectUser = userId;
+    this.deps.onState?.();
+
+    if (this.muted) {
+      this.log('debug', '全局静音中，私聊只记账不说话');
+      return;
+    }
+
+    this.deps.profiles?.touch(sessionKey, userId, name, {
+      mention: true,
+      initialAffinity: isOwner ? 60 : 20,
+    });
+
+    if (this.busy.has(sessionKey)) {
+      this.enqueueDirect(sessionKey, message);
+      return;
+    }
+    await this.replyTo(sessionKey, effective, message, 'at', now);
   }
 
   /**
@@ -1536,6 +1668,7 @@ export class QqBridge {
     message: GroupMessage | undefined,
     mode: SpeakMode,
     now: number,
+    ownerMention = false,
   ): Promise<void> {
     if (this.busy.has(groupId)) {
       this.log('debug', `群 ${groupId} 正在回复中，跳过这次`);
@@ -1739,10 +1872,12 @@ export class QqBridge {
         persona: this.deps.persona(groupId),
         selfName: this.config.selfName,
         mode,
+        scene: isPrivateKey(groupId) ? 'private' : 'group',
+        ...(isPrivateKey(groupId) ? { privateWithOwner: this.isPrivateOwnerSession(groupId) } : {}),
         transcript: transcript(turns, this.config.selfName, now),
         ...(message === undefined || message.text === '' ? {} : { incoming: `${message.name}：${message.text}` }),
         burstRange: [policy.burst.min, policy.burst.max],
-        allowVoice: policy.voiceChance > 0 || policy.proactiveVoiceChance > 0 || policy.requestedVoiceChance > 0,
+        allowVoice: !ownerMention && (policy.voiceChance > 0 || policy.proactiveVoiceChance > 0 || policy.requestedVoiceChance > 0),
         allowSing: policy.singOnRequest,
         voiceRequested: voiceRequest,
         singRequested: singRequest,
@@ -1753,6 +1888,7 @@ export class QqBridge {
         selfieRequested: selfieRequest,
         selfieAvailable,
         ownerQq: this.config.ownerQq,
+        ownerMention,
         ownerPriorityPrompt: this.deps.ownerPriority?.(),
         ...(this.deps.stickers === undefined
           ? {}
@@ -1793,6 +1929,8 @@ export class QqBridge {
       this.lastError = undefined;
 
       let plan = parseReplyPlanSafe(result.text, policy);
+      // 这次是主动 @主人：用文字说，避免语音抢先、@ 丢失
+      if (ownerMention) plan = { ...plan, action: 'text' };
       // 明确要歌：强制 singing 分支，并按 requestedSingChance 掷骰
       const requestedSong = singRequest && message !== undefined ? songTitleFrom(message.text) : undefined;
       if (singRequest) {
@@ -1828,6 +1966,7 @@ export class QqBridge {
       // 被明确要求发语音时用 requestedVoiceChance；否则用普通 voiceChance。
       const spokenText = plan.messages.join('，');
       const voiceEligible =
+        !ownerMention &&
         !imageSendRequest &&
         !selfieRequest &&
         !singRequest &&
@@ -1896,7 +2035,7 @@ export class QqBridge {
         message.hasVoice !== true
           ? message.messageId
           : undefined;
-      let sentCount = await this.deliver(groupId, policy, plan, now, mode, imageSendRequest, selfieRequest, undefined, quoteTarget, plan.emotion);
+      let sentCount = await this.deliver(groupId, policy, plan, now, mode, imageSendRequest, selfieRequest, undefined, quoteTarget, plan.emotion, ownerMention);
       if (sentCount > 0) {
         const stat = this.statOf(groupId);
         stat.replied += sentCount;
@@ -1943,8 +2082,13 @@ export class QqBridge {
     selfie?: SelfieInfo,
     quoteTo?: string,
     emotion?: string,
+    ownerMention = false,
   ): Promise<number> {
     const quoteSegment = quoteTo === undefined ? [] : [{ type: 'reply', data: { id: quoteTo } }];
+    const ownerAt =
+      ownerMention && !isPrivateKey(groupId) && /^\d{5,12}$/.test(this.config.ownerQq.trim())
+        ? [{ type: 'at' as const, data: { qq: this.config.ownerQq.trim() } }]
+        : [];
     // 唱歌优先级最高：整段是一条语音，不用连发
     if (plan.action === 'sing' && policy.singOnRequest) {
       const sung = await this.singInGroup(groupId, plan.song);
@@ -1981,12 +2125,14 @@ export class QqBridge {
       }
       let result = await this.sendSegments(
         groupId,
-        index === 0 ? [...quoteSegment, { type: 'text', data: { text } }] : [{ type: 'text', data: { text } }],
+        index === 0
+          ? [...ownerAt, ...quoteSegment, { type: 'text', data: { text } }]
+          : [{ type: 'text', data: { text } }],
       );
       if (!result.ok && index === 0 && quoteSegment.length > 0) {
         // 某些消息类型不能作为引用目标；失败时去掉引用重发，保证正文能发出去。
         this.log('warn', `带引用发送失败，改发纯文字：${result.message}`);
-        result = await this.sendSegments(groupId, [{ type: 'text', data: { text } }]);
+        result = await this.sendSegments(groupId, [...ownerAt, { type: 'text', data: { text } }]);
       }
       if (!result.ok) {
         this.log('warn', `发送失败（${result.reason}）：${result.message}`);
@@ -2199,11 +2345,22 @@ export class QqBridge {
     return undefined;
   }
 
-  /** 发消息段（自动分段：QQ 单条上限约 4500 字节，长文本要拆） */
+  /**
+   * 发消息段（自动分段：QQ 单条上限约 4500 字节，长文本要拆）。
+   *
+   * key 是私聊（`p:<QQ号>`）时改走私聊接口；调用方（deliver / 语音 / 唱歌 / 表情包）
+   * 全部走这里，所以只需要在这一处分派，私聊就自动获得了连发、引用、语音、表情包。
+   */
   private async sendSegments(groupId: string, segments: ObSegment[]): Promise<SendResult> {
     const client = this.client;
     if (client === undefined) return { ok: false, reason: 'not-connected', message: 'QQ 连接未建立' };
-    const result = await client.sendGroupMsg(groupId, segments);
+    const privateTarget = groupId.startsWith(PRIVATE_KEY_PREFIX)
+      ? groupId.slice(PRIVATE_KEY_PREFIX.length)
+      : undefined;
+    const result =
+      privateTarget === undefined
+        ? await client.sendGroupMsg(groupId, segments)
+        : await client.sendPrivateMsg(privateTarget, segments);
     // 记下她发出去的消息 id：别人引用回复这些 id 时，就是在跟她说话
     if (result.ok && result.messageId !== undefined) {
       const ids = this.selfMessageIds.get(groupId) ?? new Set<string>();
@@ -2254,6 +2411,31 @@ export class QqBridge {
       })
       .filter((group) => group.groupId !== '');
     return { ok: true, groups };
+  }
+
+  /** 决定这次主动开口是否 @主人：仅群聊、按概率、受冷却和每日上限约束。 */
+  private shouldMentionOwner(policy: GroupPolicy, state: GroupState, now: number): boolean {
+    if (isPrivateKey(state.groupId)) return false;
+    const p = policy.proactive;
+    if (!p.ownerMentionEnabled) return false;
+    if (!/^\d{5,12}$/.test(this.config.ownerQq.trim())) return false;
+    if (p.ownerMentionChance <= 0) return false;
+    if (
+      state.lastOwnerMentionAt !== undefined &&
+      now - state.lastOwnerMentionAt < p.ownerMentionCooldownMs
+    ) {
+      return false;
+    }
+    const day = dayKey(now);
+    if (state.ownerMentionDay.day !== day) state.ownerMentionDay = { day, count: 0 };
+    if (p.ownerMentionMaxPerDay > 0 && state.ownerMentionDay.count >= p.ownerMentionMaxPerDay) {
+      return false;
+    }
+    if (Math.random() >= p.ownerMentionChance) return false;
+    state.lastOwnerMentionAt = now;
+    state.ownerMentionDay.count += 1;
+    this.log('info', `群 ${state.groupId} 本次主动开口将 @主人（今日第 ${state.ownerMentionDay.count} 次）`);
+    return true;
   }
 
   /** 定时巡检：去抖窗口到点、冷场到点、冷却结束 */
@@ -2342,12 +2524,14 @@ export class QqBridge {
           this.log('info', `群 ${groupId} 主动搭话命中，但试运行开着（掷 ${roll.roll.toFixed(1)} / 命中线 ${lineText}），不发送`);
         } else {
           this.log('info', `群 ${groupId} 主动搭话命中：掷 ${roll.roll.toFixed(1)} / 命中线 ${lineText}`);
-          void this.replyTo(groupId, policy, undefined, 'proactive', now).catch((e) => {
+          const ownerMention = this.shouldMentionOwner(policy, state, now);
+          void this.replyTo(groupId, policy, undefined, 'proactive', now, ownerMention).catch((e) => {
             this.recordError(`主动开口异常：${e instanceof Error ? e.message : String(e)}`);
           });
         }
       } else {
-        void this.replyTo(groupId, policy, undefined, 'proactive', now).catch((e) => {
+        const ownerMention = this.shouldMentionOwner(policy, state, now);
+        void this.replyTo(groupId, policy, undefined, 'proactive', now, ownerMention).catch((e) => {
           this.recordError(`主动开口异常：${e instanceof Error ? e.message : String(e)}`);
         });
       }
@@ -2386,9 +2570,25 @@ export class QqBridge {
     return created;
   }
 
-  /** 群策略（显式配置优先） */
+  /**
+   * 会话策略。
+   *
+   * key 有两种：群号（纯数字）与私聊的 `p:<QQ号>`。所有下游代码（记忆压缩、心情、
+   * 主动开口、语音概率……）都只通过这个函数取策略，所以在这里做一次分派，
+   * 就能让私聊用上跟群聊一模一样的全部行为，而不必到处加 if。
+   */
   private policyOf(groupId: string): GroupPolicy {
+    const privateUserId = groupId.startsWith(PRIVATE_KEY_PREFIX)
+      ? groupId.slice(PRIVATE_KEY_PREFIX.length)
+      : undefined;
+    if (privateUserId !== undefined) return privatePolicyFor(this.config, privateUserId);
     return policyFor(this.config, groupId);
+  }
+
+  /** 这段私聊的对面是不是主人（决定用哪套私聊规则） */
+  private isPrivateOwnerSession(sessionKey: string): boolean {
+    if (!sessionKey.startsWith(PRIVATE_KEY_PREFIX)) return false;
+    return this.isOwner(sessionKey.slice(PRIVATE_KEY_PREFIX.length));
   }
 
   private adjustMood(groupId: string, delta: number, reason: string): void {

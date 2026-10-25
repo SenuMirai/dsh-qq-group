@@ -44,6 +44,10 @@ export interface GroupState {
   directReplyTimes: number[];
   /** 当天主动开口次数（跨天清零） */
   proactiveDay: { day: string; count: number };
+  /** 最近一次主动 @主人 的时间 */
+  lastOwnerMentionAt?: number;
+  /** 当天主动 @主人 次数（跨天清零） */
+  ownerMentionDay: { day: string; count: number };
   /** 去抖窗口：第一句话到达后设定，窗口结束才决定要不要接 */
   pendingSince?: number;
   /** 窗口里攒了几个人类消息 */
@@ -59,6 +63,7 @@ export function createGroupState(groupId: string): GroupState {
     replyTimes: [],
     directReplyTimes: [],
     proactiveDay: { day: '', count: 0 },
+    ownerMentionDay: { day: '', count: 0 },
     pendingCount: 0,
   };
 }

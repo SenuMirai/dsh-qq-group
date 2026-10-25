@@ -1,6 +1,6 @@
 # dsh-qq-group
 
-> 当前版本：**v1.21.1**（QQ空间、七角色 GPT-SoVITS、日记滚动、保存置顶）
+> 当前版本：**v1.22.0**（QQ空间、七角色 GPT-SoVITS、日记滚动、保存置顶）
 
 独立的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) QQ 群聊插件：有人设、有记忆、会判断该不该接话，支持主动/被动搭话、语音、唱歌、表情包、日记、QQ空间说说和视觉看图。
 
@@ -19,7 +19,8 @@ A standalone QQ group-chat plugin for [DeepSeek Harness](https://github.com/deep
 |---|---|
 | **OneBot 11 / NapCat** | 通过 WebSocket 连接 NapCatQQ，支持自动重连、启动检查、自动拉起 |
 | **人设与模型** | 多张人设卡；可按群绑定，一张卡可绑多个群，未绑定跟随全局；模型 provider/model、推理档位、备用模型可按群单独选 |
-| **主动搭话** | 独立页：冷场阈值、概率/峰谷命中线、近远时机、冷却、每日上限、安静时段、试运行、主动语音概率 |
+| **主动搭话** | 独立页：搭话模式、冷场阈值、概率/峰谷命中线、近远时机、冷却、每日上限、安静时段、试运行、主动语音概率 |
+| **主动 @主人** | 主动开口时按概率 @ 主人，向她吐槽、分享群里趣事、抱怨群友或告状；仅群聊生效，私聊禁用；概率、冷却、每日上限可调 |
 | **价值评分 v3** | 不是每条都回：@/叫名字/引用直接回；普通闲聊按关键词、成员、上下文、熟识度、好感度、夜间等算 0~100 分 |
 | **冷场逻辑** | 任何人类消息都会重置接话去抖和主动开口倒计时；群里一直有人说话时她不插话 |
 | **直接对话队列** | 她正在生成时收到的 @/引用会排队，不会丢；主动开口会给 @ 让位 |
@@ -176,6 +177,37 @@ DSH 设置 →「QQ 群聊」→「连接」：
 - 关闭 / 自定义（多选）/ 所有图片；
 - 自定义可同时勾选：`@/叫名字/引用`、`强相关上下文`、`文字里问她看法`；
 - 只有真正回复且命中条件才下载并计费；纯图片、无文字、没 @ 她的消息不触发。
+
+### 主动 @主人
+
+主动搭话时，偶尔会专门 @ 主人，而不是只对群里说话。
+
+- 开关在「主动搭话」页签最前面；勾选后展开详细设置。
+- **仅群聊生效**：私聊会话里选项禁用，并标注原因。
+- 可调参数：命中概率、最小间隔（分钟）、每日上限（0 = 不限次数）。
+- 只在主动开口命中后才有机会 @，不会每条回复都 @。
+- 这次会强制用文字发，避免语音抢占 @；正文不写 @，由系统自动带。
+- 提示词会要求她讲具体的事：吐槽、分享刚发生的趣事、抱怨群友、告状、撒娇。
+
+### 语音模型安装
+
+GPT-SoVITS 模型不随仓库分发，需要本地放置：
+
+```text
+GPT_SoVITS/GPT_weights_v2ProPlus/<角色>-e10.ckpt
+GPT_SoVITS/SoVITS_weights_v2ProPlus/<角色>_e10_s<步数>.pth
+GPT-SoVITS/ref/voices.json
+GPT-SoVITS/ref/*.wav
+```
+
+完整步骤见 [docs/VOICE-MODELS.md](./docs/VOICE-MODELS.md)。
+
+### 常用命令与文档
+
+- [语音模型安装](./docs/VOICE-MODELS.md)
+- [常用命令与接口](./docs/COMMANDS.md)
+- [触发词与指令](./docs/TRIGGERS.md)
+- [更新日志](./CHANGELOG.md)
 
 ### 参考项目与致谢
 
@@ -424,7 +456,11 @@ DSH 设置 →「QQ 群聊」→「连接」：
 
 ### 许可
 
-MIT，© 2026 SenuMirai。见 [LICENSE](./LICENSE)。
+- **插件代码**：MIT，© 2026 SenuMirai。见 [LICENSE](./LICENSE)。
+- **GPT-SoVITS 角色权重**：CC-BY-NC 4.0，训练者标注为红血球AE3803、白菜工厂1145号员工；禁止商用、禁止二次配布；二创需标注训练者。
+- **角色形象与语音**：权利归米哈游；本项目仅用于非商业的个人使用。
+- 仓库不包含模型权重；模型需自行下载并放在本地。
+- RVC、CosyVoice2、Kokoro、IndexTTS 已从插件移除，不在本仓库依赖内。
 
 ---
 
@@ -436,7 +472,8 @@ MIT，© 2026 SenuMirai。见 [LICENSE](./LICENSE)。
 |---|---|
 | **OneBot 11 / NapCat** | WebSocket connection to NapCatQQ; reconnect, startup checks, optional auto-launch |
 | **Persona & model** | Multiple persona cards; bind per group (one card can serve many groups), otherwise follow global; provider/model, reasoning effort and fallback can be per group |
-| **Proactive chat** | Dedicated tab: idle threshold, peak/off-peak hit lines, timing factors, cooldown, daily cap, quiet hours, trial mode, proactive voice chance |
+| **Proactive chat** | Dedicated tab: chat mode, idle threshold, peak/off-peak hit lines, timing factors, cooldown, daily cap, quiet hours, trial mode, proactive voice chance |
+| **Proactive @owner** | Occasionally @ the owner during proactive chat to complain, share group gossip or report on members; group chats only, disabled in private; chance, cooldown and daily cap are configurable |
 | **Value scoring v3** | Not a reply to everything: @/name/quote always reply; ambient chat is scored 0–100 from keywords, members, context, familiarity, affinity and night penalty |
 | **Cold-start logic** | Any human message resets both the reply debounce and proactive countdown; she stays quiet while the group is active |
 | **Direct-message queue** | @/quote messages received while generating are queued, never dropped; proactive messages yield to direct ones |
@@ -810,3 +847,12 @@ Each project keeps its own license; this project borrows design ideas only and d
 ### License
 
 MIT, © 2026 SenuMirai. See [LICENSE](./LICENSE).
+
+- Plugin code: MIT.
+- GPT-SoVITS character weights: CC-BY-NC 4.0; non-commercial, no redistribution.
+- Character likeness and voice rights belong to miHoYo.
+- Model weights are not included in this repository.
+
+---
+
+<div align="center"><sub>千宇未来 · <a href="https://github.com/SenuMirai/dsh-qq-group">dsh-qq-group</a></sub></div>
