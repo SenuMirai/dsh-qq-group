@@ -242,6 +242,7 @@ export function groupSystemPrompt(input: PromptInput): string {
         ? '【最近的私聊记录（时间正序，最后一行最新）】'
         : '【最近群里的聊天（时间正序，最后一行最新）】',
     );
+    parts.push('（里面可能夹着更早但重要的约定、链接、名字或偏好；不要因为时间早当没发生。）');
     parts.push(input.transcript.trim());
   }
   if (input.incoming !== undefined && input.incoming.trim() !== '') {

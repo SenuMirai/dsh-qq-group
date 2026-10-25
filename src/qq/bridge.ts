@@ -236,6 +236,13 @@ export interface RuntimeStats {
   state: GroupState;
 }
 
+/** 值得在上下文被截断后仍保留的旧消息（链接、约定、称呼、偏好等）。 */
+function importantTurn(text: string): boolean {
+  return /https?:\/\/|记住|记一下|以后|答应|约好|说好|项目|部署|链接|叫我|名字|喜欢|不吃|过敏|生日|红包|别忘/u.test(
+    text,
+  );
+}
+
 /**
  * QQ 群桥。
  *
@@ -480,7 +487,7 @@ export class QqBridge {
         ? { factKey: input.factKey.trim() }
         : {}),
       source: 'manual',
-    });
+    }, { dailyQuota: 0 });
     if (result.ok) this.persistMemoryV3();
     return result.ok ? { ok: true, item: result.item } : { ok: false, message: result.reason ?? '写入失败' };
   }
@@ -1797,12 +1804,18 @@ export class QqBridge {
       const group = groupMemory(this.memory, groupId);
       const needsContext =
         message !== undefined &&
-        /这|那|他|她|它|上面|刚才|前面|继续|还有|那个|这个|引用|之前|楼上|楼下|说的|上一条|刚刚/.test(message.text);
+        /这|那|他|她|它|上面|刚才|前面|继续|还有|那个|这个|引用|之前|楼上|楼下|说的|上一条|刚刚|链接|项目|部署|发给|转给|给他|给她/.test(message.text);
       const contextLimit =
         policy.contextMode === 'adaptive' && message !== undefined && !needsContext && message.text.length <= 60
-          ? Math.max(1, policy.adaptiveMinTurns || 4)
-          : Math.max(1, policy.contextTurns || CONTEXT_TURNS);
-      const turns = recentTurns(group, contextLimit);
+          ? Math.max(8, policy.adaptiveMinTurns || 4)
+          : Math.max(32, policy.contextTurns || CONTEXT_TURNS);
+      const recentAll = recentTurns(group, Math.max(contextLimit, 60));
+      const selectedTurns = recentAll.slice(-contextLimit);
+      const selectedKeys = new Set(selectedTurns.map((turn) => `${turn.ts}:${turn.text}`));
+      const olderImportant = recentAll
+        .filter((turn) => !selectedKeys.has(`${turn.ts}:${turn.text}`) && importantTurn(turn.text))
+        .slice(-6);
+      const turns = [...olderImportant, ...selectedTurns].sort((a, b) => a.ts - b.ts);
       const speakerId = message?.userId ?? this.lastSpeaker.get(groupId) ?? '';
       const speakerProfile = speakerId === '' ? undefined : this.deps.profiles?.get(groupId, speakerId);
       const familiarity = speakerProfile === undefined ? 0 : Math.round(speakerProfile.familiarity);
