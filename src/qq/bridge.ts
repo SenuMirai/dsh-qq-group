@@ -165,7 +165,7 @@ export interface BridgeDeps {
     recallLimit: () => number;
     recallChars: () => number;
     add: (groupId: string, input: PermanentAddInput) => PermanentAddResult;
-    list: (groupId: string) => PermanentEntry[];
+    list: (groupId: string, scope: 'session' | 'global') => PermanentEntry[];
   };
 }
 
@@ -1089,10 +1089,13 @@ export class QqBridge {
       !message.text.trim().startsWith('/') &&
       (this.isOwner(userId) || this.deps.permanent.people().includes(userId))
     ) {
+      const scope = this.isOwner(userId) && isPrivateKey(groupId) ? 'global' : 'session';
       const added = this.deps.permanent.add(groupId, {
         text: `${message.name}：${message.text}`,
         people: [userId],
         source: 'auto',
+        scope,
+        sensitivity: scope === 'global' ? 'private' : 'normal',
         mergeWithinMs: 10 * 60_000,
       });
       if (!added.ok && added.reason === 'full' && !this.permanentFullNotified.has(groupId)) {
@@ -2019,18 +2022,33 @@ export class QqBridge {
           ? []
           : await this.downloadChatImages({ images: forwardSegs } as GroupMessage);
       const chatImages = [...baseChatImages, ...forwardChatImages].slice(0, 2);
-      const permanentMemories =
-        this.deps.permanent === undefined || !this.deps.permanent.enabled()
-          ? []
-          : selectPermanent(
-              this.deps.permanent.list(groupId),
-              message?.text ?? '',
-              this.deps.permanent.recallLimit(),
-              this.deps.permanent.recallChars(),
-            ).map(
-              (item) =>
-                `${new Date(item.createdAt).toLocaleDateString('zh-CN')}：${item.text.replace(/\n/g, ' / ').slice(0, 500)}`,
-            );
+      const permanentMemories = (() => {
+        if (this.deps.permanent === undefined || !this.deps.permanent.enabled()) return [];
+        const ownerPrivate = isPrivateKey(groupId) && this.isPrivateOwnerSession(groupId);
+        const ownerSpeaking = !isPrivateKey(groupId) && message?.userId === this.config.ownerQq;
+        const global =
+          ownerPrivate || ownerSpeaking
+            ? this.deps.permanent.list(groupId, 'global').filter(
+                (item) => ownerPrivate || item.sensitivity !== 'private',
+              )
+            : [];
+        const session = this.deps.permanent.list(groupId, 'session');
+        const seen = new Set<string>();
+        const entries = [...global, ...session].filter((item) => {
+          if (seen.has(item.id)) return false;
+          seen.add(item.id);
+          return true;
+        });
+        return selectPermanent(
+          entries,
+          message?.text ?? '',
+          this.deps.permanent.recallLimit(),
+          this.deps.permanent.recallChars(),
+        ).map(
+          (item) =>
+            `${new Date(item.createdAt).toLocaleDateString('zh-CN')}：${item.text.replace(/\n/g, ' / ').slice(0, 500)}`,
+        );
+      })();
       const system = groupSystemPrompt({
         persona: this.deps.persona(groupId),
         selfName: this.config.selfName,

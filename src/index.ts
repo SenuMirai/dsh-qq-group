@@ -27,9 +27,11 @@ import {
   addPermanent,
   deletePermanent,
   listPermanent,
+  promotePermanent,
   readPermanentStore,
   replacePermanent,
   writePermanentStore,
+  type PermanentScope,
 } from './qq/permanent';
 import {
   createStickerHub,
@@ -130,6 +132,8 @@ type Settings = {
     people: string[];
     /** 每个群/会话的容量；满了只封存不删除 */
     capacity: number;
+    /** 全局主人记忆容量 */
+    globalCapacity: number;
     recallLimit: number;
     recallChars: number;
   };
@@ -251,6 +255,7 @@ const DEFAULT_SETTINGS: Settings = {
     autoCapture: true,
     people: [],
     capacity: 200,
+    globalCapacity: 100,
     recallLimit: 12,
     recallChars: 1500,
   },
@@ -436,6 +441,7 @@ function readSettings(root: string): Settings {
               ).slice(0, 50)
             : [],
           capacity: Math.round(clampNumber(source.capacity, 10, 5000, 200)),
+          globalCapacity: Math.round(clampNumber(source.globalCapacity, 10, 2000, 100)),
           recallLimit: Math.round(clampNumber(source.recallLimit, 1, 50, 12)),
           recallChars: Math.round(clampNumber(source.recallChars, 200, 8000, 1500)),
         };
@@ -598,14 +604,25 @@ function appendQzone(root: string, entry: QzoneEntry): void {
 /** 永久记忆：独立文件，不参与摘要/淡忘。 */
 const permanentPath = (root: string): string => join(root, 'permanent-memory.json');
 
-function permanentList(root: string, groupId: string): ReturnType<typeof listPermanent> {
-  return listPermanent(readPermanentStore(permanentPath(root)), groupId);
+function permanentList(
+  root: string,
+  groupId: string,
+  scope: PermanentScope = 'session',
+): ReturnType<typeof listPermanent> {
+  return listPermanent(readPermanentStore(permanentPath(root)), groupId, scope);
 }
 
 function permanentAdd(
   root: string,
   groupId: string,
-  input: { text: string; people?: string[]; source?: 'auto' | 'manual' | 'merge'; mergeWithinMs?: number },
+  input: {
+    text: string;
+    people?: string[];
+    source?: 'auto' | 'manual' | 'merge';
+    scope?: PermanentScope;
+    sensitivity?: 'normal' | 'private';
+    mergeWithinMs?: number;
+  },
   capacity: number,
 ): ReturnType<typeof addPermanent> {
   const path = permanentPath(root);
@@ -615,10 +632,15 @@ function permanentAdd(
   return result;
 }
 
-function permanentDelete(root: string, groupId: string, id: string): boolean {
+function permanentDelete(
+  root: string,
+  groupId: string,
+  id: string,
+  scope: PermanentScope = 'session',
+): boolean {
   const path = permanentPath(root);
   const store = readPermanentStore(path);
-  const ok = deletePermanent(store, groupId, id);
+  const ok = deletePermanent(store, groupId, id, scope);
   if (ok) writePermanentStore(path, store);
   return ok;
 }
@@ -628,10 +650,25 @@ function permanentMerge(
   groupId: string,
   ids: string[],
   text: string,
+  scope: PermanentScope = 'session',
 ): ReturnType<typeof replacePermanent> {
   const path = permanentPath(root);
   const store = readPermanentStore(path);
-  const item = replacePermanent(store, groupId, ids, text);
+  const item = replacePermanent(store, groupId, ids, text, scope);
+  if (item !== undefined) writePermanentStore(path, store);
+  return item;
+}
+
+function permanentPromote(
+  root: string,
+  groupId: string,
+  id: string,
+  capacity: number,
+  sensitivity: 'normal' | 'private',
+): ReturnType<typeof promotePermanent> {
+  const path = permanentPath(root);
+  const store = readPermanentStore(path);
+  const item = promotePermanent(store, groupId, id, capacity, sensitivity);
   if (item !== undefined) writePermanentStore(path, store);
   return item;
 }
@@ -1355,9 +1392,12 @@ export function apply(ctx: any): void {
       people: () => readSettings(root).permanent.people,
       recallLimit: () => readSettings(root).permanent.recallLimit,
       recallChars: () => readSettings(root).permanent.recallChars,
-      add: (groupId, input) =>
-        permanentAdd(root, groupId, input, readSettings(root).permanent.capacity),
-      list: (groupId) => permanentList(root, groupId),
+      add: (groupId, input) => {
+        const permanent = readSettings(root).permanent;
+        const capacity = input.scope === 'global' ? permanent.globalCapacity : permanent.capacity;
+        return permanentAdd(root, groupId, input, capacity);
+      },
+      list: (groupId, scope) => permanentList(root, groupId, scope),
     },
     onDiary: (entry) => {
       try {
@@ -2275,6 +2315,12 @@ export function apply(ctx: any): void {
                   typeof incoming.capacity === 'number'
                     ? Math.round(clampNumber(incoming.capacity, 10, 5000, current.permanent.capacity))
                     : current.permanent.capacity,
+                globalCapacity:
+                  typeof incoming.globalCapacity === 'number'
+                    ? Math.round(
+                        clampNumber(incoming.globalCapacity, 10, 2000, current.permanent.globalCapacity),
+                      )
+                    : current.permanent.globalCapacity,
                 recallLimit:
                   typeof incoming.recallLimit === 'number'
                     ? Math.round(clampNumber(incoming.recallLimit, 1, 50, current.permanent.recallLimit))
@@ -2477,16 +2523,25 @@ export function apply(ctx: any): void {
           const groupId = urlGroup;
           if (groupId === '') return send(200, { ok: false, message: '缺少 groupId' });
           const store = readPermanentStore(permanentPath(root));
-          const group = store.groups[groupId];
-          const items = permanentList(root, groupId);
+          const globalBucket = store.global;
+          const sessionBucket = store.groups[groupId];
+          const globalItems = permanentList(root, groupId, 'global');
+          const sessionItems = permanentList(root, groupId, 'session');
           return send(200, {
             ok: true,
             groupId,
-            items,
-            count: items.length,
-            capacity: settings.permanent.capacity,
-            sealed: group?.sealedAt !== undefined,
-            ...(group?.sealedAt === undefined ? {} : { sealedAt: group.sealedAt }),
+            global: {
+              items: globalItems,
+              count: globalItems.length,
+              capacity: settings.permanent.globalCapacity,
+              sealed: globalBucket?.sealedAt !== undefined,
+            },
+            session: {
+              items: sessionItems,
+              count: sessionItems.length,
+              capacity: settings.permanent.capacity,
+              sealed: sessionBucket?.sealedAt !== undefined,
+            },
           });
         }
         if (method !== 'POST') return send(405, { error: 'method not allowed' });
@@ -2496,17 +2551,23 @@ export function apply(ctx: any): void {
           text?: unknown;
           id?: unknown;
           ids?: unknown;
+          scope?: unknown;
+          sensitivity?: unknown;
         } | null) ?? {};
         const groupId = typeof payload.groupId === 'string' ? payload.groupId : urlGroup;
         if (groupId === '') return send(200, { ok: false, message: '缺少 groupId' });
         const action = typeof payload.action === 'string' ? payload.action : '';
+        const scope: PermanentScope = payload.scope === 'global' ? 'global' : 'session';
+        const sensitivity = payload.sensitivity === 'private' ? 'private' : 'normal';
         if (action === 'add') {
           const text = typeof payload.text === 'string' ? payload.text.trim() : '';
+          const capacity =
+            scope === 'global' ? settings.permanent.globalCapacity : settings.permanent.capacity;
           const added = permanentAdd(
             root,
             groupId,
-            { text, people: [], source: 'manual' },
-            settings.permanent.capacity,
+            { text, people: [], source: 'manual', scope, sensitivity },
+            capacity,
           );
           if (!added.ok) {
             return send(200, {
@@ -2522,14 +2583,31 @@ export function apply(ctx: any): void {
         }
         if (action === 'delete') {
           const id = typeof payload.id === 'string' ? payload.id : '';
-          const ok = id !== '' && permanentDelete(root, groupId, id);
+          const ok = id !== '' && permanentDelete(root, groupId, id, scope);
           return send(200, ok ? { ok: true } : { ok: false, message: '没有找到这条记忆' });
+        }
+        if (action === 'promote') {
+          const id = typeof payload.id === 'string' ? payload.id : '';
+          if (id === '') return send(200, { ok: false, message: '缺少 id' });
+          const promoted = permanentPromote(
+            root,
+            groupId,
+            id,
+            settings.permanent.globalCapacity,
+            sensitivity,
+          );
+          return send(
+            200,
+            promoted === undefined
+              ? { ok: false, message: '提升失败：全局容量已满或条目不存在' }
+              : { ok: true, item: promoted },
+          );
         }
         if (action === 'merge') {
           const ids = Array.isArray(payload.ids)
             ? payload.ids.filter((x): x is string => typeof x === 'string').slice(0, 50)
             : [];
-          const selected = permanentList(root, groupId).filter((item) => ids.includes(item.id));
+          const selected = permanentList(root, groupId, scope).filter((item) => ids.includes(item.id));
           if (selected.length < 2) return send(200, { ok: false, message: '至少选择两条永久记忆' });
           const material = selected.map((item) => `- ${item.text}`).join('\n');
           const result = await generate(
@@ -2546,9 +2624,13 @@ export function apply(ctx: any): void {
             ? result.text.trim().slice(0, 2000)
             : selected.map((item) => item.text).join('；').slice(0, 2000);
           if (mergedText === '') return send(200, { ok: false, message: '合并结果为空' });
-          const merged = permanentMerge(root, groupId, ids, mergedText);
+          const merged = permanentMerge(root, groupId, ids, mergedText, scope);
           if (merged === undefined) return send(200, { ok: false, message: '合并失败' });
-          return send(200, { ok: true, item: merged, count: permanentList(root, groupId).length });
+          return send(200, {
+            ok: true,
+            item: merged,
+            count: permanentList(root, groupId, scope).length,
+          });
         }
         return send(200, { ok: false, message: '未知 action' });
       }
