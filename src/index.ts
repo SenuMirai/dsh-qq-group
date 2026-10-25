@@ -895,7 +895,7 @@ export function apply(ctx: any): void {
             `${system}\n\n【重要】直接输出最终答案/JSON，不要输出任何思考过程，也不要只给 reasoning。`,
             history,
             user,
-            { ...options, retry: true, modelOverride: fallback, reasoningEffort: '' },
+            { ...options, retry: true, modelOverride: fallback, reasoningEffort: 'low' },
           );
         }
         if (reasoningText === '') {

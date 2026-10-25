@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 1.23.5 — 备用模型低推理修复
+
+- 修复主模型空文本后，备用模型调用把 `reasoningEffort` 置空，导致 `deepseek-v4-pro` 只思考、不输出正文、备用也报“模型未返回文本”。
+- 备用重试改为 `reasoningEffort: 'low'`，与已验证可用的低推理路径一致。
+- 现在主模型 `qoder-global/dfmodel` 空文本时，会自动切到 `deepseek-official/deepseek-v4-pro` 并正常出字。
+- `/model-check` 也走同一条 generate 链，主模型失败时会显示备用结果。
+
 ## 1.23.4 — 模型选择自动保存
 
 - 主模型、备用模型的下拉框改为**选择即保存**，不再依赖顶部「保存全部」。
