@@ -2066,9 +2066,6 @@ export function apply(ctx: any): void {
         // 「启动」= 需要的话先拉起 NapCat，再连 OneBot；这样不用自己去找 bat。
         const napcat = await ensureNapcat();
         if (!napcat.ok) return send(200, { ok: false, message: napcat.message, napcat });
-        const config = readQqConfig(qqConfigPath(root)).config;
-        const applied = applyMode(config, readSettings(root).mode);
-        writeFileSync(qqConfigPath(root), `${JSON.stringify(applied, null, 2)}\n`, 'utf8');
         const tts = await ensureTtsGateway();
         const started = (await qqHost.handle('qq/start', 'POST')) as Record<string, unknown>;
         return send(200, { ...started, napcat, tts });
