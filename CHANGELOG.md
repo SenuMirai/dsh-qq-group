@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 1.23.8 — 移除错误的 workbuddy-ai 别名
+
+- 删除 `workbuddy-ai -> workbuddy` 的强制别名。
+- `workbuddy` 和 `workbuddy-ai` 是两个真实且不同的 provider（WorkBuddy / WorkBuddy AI），之前的别名会把备用模型合并成主模型，导致“保存后重置为 WorkBuddy”。
+- 读取和保存设置不再改写 provider，备用选择可以正常保留。
+- 当前备用已写为 `workbuddy-ai / deepseek-v4.1-flash`，主模型 `workbuddy / deepseek-v4.1-flash`。
+
 ## 1.23.7 — 备用与主模型相同提示
 
 - 修复「备用模型与主模型相同」时测试结果显示成「未设置备用模型」的误导。

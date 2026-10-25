@@ -175,9 +175,6 @@ function diskPluginVersion(): string {
 const clampNumber = (value: unknown, min: number, max: number, fallback: number): number =>
   typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
 
-/** 兼容旧配置里的 provider 别名；不认识的保持原样，交给宿主报错。 */
-const canonicalProvider = (value: string): string => (value === 'workbuddy-ai' ? 'workbuddy' : value);
-
 /** 当前生效的人设：优先群绑定卡片，其次全局激活卡片，最后旧 persona 字段/默认。 */function activePersona(settings: Settings, groupId?: string): string {
   const boundId = groupId === undefined ? '' : settings.groupPersonaIds[groupId] ?? '';
   const bound = settings.personas.find((item) => item.id === boundId);
@@ -334,7 +331,7 @@ function readSettings(root: string): Settings {
       mode: raw.mode === 'proactive' ? 'proactive' : 'passive',
       model:
         raw.model && typeof raw.model.provider === 'string' && typeof raw.model.model === 'string'
-          ? { provider: canonicalProvider(raw.model.provider), model: raw.model.model }
+          ? { provider: raw.model.provider, model: raw.model.model }
           : { provider: '', model: '' },
       reasoningEffort: typeof raw.reasoningEffort === 'string' ? raw.reasoningEffort : '',
       contextWindows: Object.fromEntries(
@@ -346,7 +343,7 @@ function readSettings(root: string): Settings {
         raw.fallbackModel &&
         typeof raw.fallbackModel.provider === 'string' &&
         typeof raw.fallbackModel.model === 'string'
-          ? { provider: canonicalProvider(raw.fallbackModel.provider), model: raw.fallbackModel.model }
+          ? { provider: raw.fallbackModel.provider, model: raw.fallbackModel.model }
           : { provider: '', model: '' },
       stickerSave: raw.stickerSave === true,
       stickerFilter: raw.stickerFilter === 'all' ? 'all' : 'smart',
@@ -1939,7 +1936,7 @@ export function apply(ctx: any): void {
               patch.settings.model &&
               typeof patch.settings.model.provider === 'string' &&
               typeof patch.settings.model.model === 'string'
-                ? { provider: canonicalProvider(patch.settings.model.provider), model: patch.settings.model.model }
+                ? { provider: patch.settings.model.provider, model: patch.settings.model.model }
                 : current.model,
             reasoningEffort:
               typeof patch.settings.reasoningEffort === 'string' ? patch.settings.reasoningEffort : current.reasoningEffort,
@@ -1961,7 +1958,7 @@ export function apply(ctx: any): void {
               patch.settings.fallbackModel &&
               typeof patch.settings.fallbackModel.provider === 'string' &&
               typeof patch.settings.fallbackModel.model === 'string'
-                ? { provider: canonicalProvider(patch.settings.fallbackModel.provider), model: patch.settings.fallbackModel.model }
+                ? { provider: patch.settings.fallbackModel.provider, model: patch.settings.fallbackModel.model }
                 : current.fallbackModel,
             stickerSave: typeof patch.settings.stickerSave === 'boolean' ? patch.settings.stickerSave : current.stickerSave,
             stickerFilter: patch.settings.stickerFilter === 'all' ? 'all' : 'smart',
