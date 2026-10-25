@@ -292,6 +292,10 @@ export class OneBotClient extends EventEmitter {
   private readonly queue: ObEvent[] = [];
   private draining = false;
   private dropped = 0;
+  /** 账号级发送节流：所有群/私聊共用，避免排队消息一次性猛发触发 1200 限流 */
+  private lastSendAt = 0;
+  private sendBlockedUntil = 0;
+  private sendChain: Promise<void> = Promise.resolve();
 
   constructor(options: OneBotOptions) {
     super();
@@ -565,16 +569,35 @@ export class OneBotClient extends EventEmitter {
     }
   }
 
+  /** 发送前排队：最小 1.2 秒间隔；被限流后全局冷却 30 秒 */
+  private async paceSend(): Promise<void> {
+    const run = async (): Promise<void> => {
+      const now = Date.now();
+      const wait = Math.max(0, 1_200 - (now - this.lastSendAt), this.sendBlockedUntil - now);
+      if (wait > 0) await new Promise<void>((resolve) => setTimeout(resolve, wait));
+      this.lastSendAt = Date.now();
+    };
+    const next = this.sendChain.then(run, run);
+    this.sendChain = next.catch(() => undefined);
+    await next;
+  }
+
   /** 发群消息（消息段数组） */
   async sendGroupMsg(groupId: string, message: ObSegment[] | string): Promise<SendResult> {
+    await this.paceSend();
     const response = await this.call('send_group_msg', { group_id: groupId, message });
-    return toSendResult(response);
+    const result = toSendResult(response);
+    if (!result.ok && result.reason === 'rate-limited') this.sendBlockedUntil = Date.now() + 30_000;
+    return result;
   }
 
   /** 发私聊消息 */
   async sendPrivateMsg(userId: string, message: ObSegment[] | string): Promise<SendResult> {
+    await this.paceSend();
     const response = await this.call('send_private_msg', { user_id: userId, message });
-    return toSendResult(response);
+    const result = toSendResult(response);
+    if (!result.ok && result.reason === 'rate-limited') this.sendBlockedUntil = Date.now() + 30_000;
+    return result;
   }
 
   /** 取群信息（群名等）；失败返回 undefined，不抛 */
