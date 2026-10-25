@@ -1238,11 +1238,21 @@ export function apply(ctx: any): void {
         };
         const primary = await probe(sel);
         const fallbackRef = readSettings(root).fallbackModel;
-        const hasFallback =
-          fallbackRef.provider !== '' &&
-          fallbackRef.model !== '' &&
-          !(fallbackRef.provider === sel.provider && fallbackRef.model === sel.model);
-        const fallback = hasFallback ? await probe(fallbackRef) : null;
+        const configuredFallback = fallbackRef.provider !== '' && fallbackRef.model !== '';
+        const sameAsPrimary =
+          configuredFallback &&
+          fallbackRef.provider === sel.provider &&
+          fallbackRef.model === sel.model;
+        const fallback = sameAsPrimary
+          ? {
+              provider: fallbackRef.provider,
+              model: fallbackRef.model,
+              skipped: true,
+              reason: 'same-as-primary',
+            }
+          : configuredFallback
+            ? await probe(fallbackRef)
+            : null;
         const primaryOk = primary.ok === true;
         const fallbackOk = fallback !== null && fallback.ok === true;
         return send(200, {
