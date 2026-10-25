@@ -211,7 +211,7 @@ const DEFAULT_SETTINGS: Settings = {
   stickerMaxMB: 200,
   autoStart: false,
   autoLaunchNapcat: true,
-  napcatLauncher: '',
+  napcatLauncher: 'C:\\DSHwork\\start-napcat.bat',
   whitelist: [],
   whitelistFloor: 95,
   blacklist: [],
@@ -495,6 +495,9 @@ function applyMode(config: QqConfig, mode: Settings['mode']): QqConfig {
     ...config,
     groups: Object.fromEntries(Object.entries(config.groups).map(([id, policy]) => [id, adjust(policy)])),
     defaultGroup: adjust(config.defaultGroup),
+    // 私聊的策略表也要跟着切换，否则「被动模式」只关住了群、私聊照旧
+    privates: Object.fromEntries(Object.entries(config.privates).map(([id, policy]) => [id, adjust(policy)])),
+    defaultPrivate: adjust(config.defaultPrivate),
   };
 }
 
@@ -1850,6 +1853,12 @@ export function apply(ctx: any): void {
                 ? clampNumber(patch.settings.ownerAffinity, -100, 100, current.ownerAffinity)
                 : current.ownerAffinity,
             activePersonaId,
+            mode:
+              patch.settings.mode === 'proactive'
+                ? 'proactive'
+                : patch.settings.mode === 'passive'
+                  ? 'passive'
+                  : current.mode,
             qzone: (() => {
               const incoming =
                 patch.settings.qzone !== null && typeof patch.settings.qzone === 'object'
