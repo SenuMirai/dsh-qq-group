@@ -738,6 +738,8 @@ export function apply(ctx: any): void {
       reasoningEffort?: string;
       modelOverride?: ModelRef;
       images?: Array<{ data: Uint8Array; mediaType: string; name?: string }>;
+      /** 诊断用：空文本时不再自动切备用/低推理重试 */
+      noFallback?: boolean;
     } = {},
   ) => {
     const llm = ctx.llm as { stream(o: unknown): AsyncIterable<unknown> } | undefined;
@@ -882,6 +884,9 @@ export function apply(ctx: any): void {
       }
       const kinds = blocks.map((b) => String((b as { type?: unknown }).type ?? '?')).join(',');
       console.warn(`[dsh-qq-group] 模型没有文本块（blocks=[${kinds}]）${options.retry === true ? '（重试仍失败）' : ''}`);
+      if (options.noFallback === true) {
+        return { ok: false as const, reason: 'generate-error', message: '模型未返回文本（诊断模式，未回退）' };
+      }
       if (options.retry !== true) {
         const settings = readSettings(root);
         const fallback = settings.fallbackModel;
@@ -1214,16 +1219,40 @@ export function apply(ctx: any): void {
       if (rest === 'model-check') {
         if (method !== 'POST') return send(405, { error: 'method not allowed' });
         const { sel, source } = effectiveModel();
-        const started = Date.now();
-        // 不设 maxTokens：推理型模型会把小预算全花在思考上，导致「未返回文本」的假故障。
-        const result = await generate('你是一个模型连通性自检助手。只回复一个词：ok', [], 'ping', {
-          purpose: 'model-check',
-        });
+        const probe = async (ref: ModelRef): Promise<Record<string, unknown>> => {
+          const started = Date.now();
+          // 不设 maxTokens；noFallback 确保测试的是这个模型本身，不把备用成功算到它头上。
+          const result = await generate('你是一个模型连通性自检助手。只回复一个词：ok', [], 'ping', {
+            purpose: 'model-check',
+            modelOverride: ref,
+            noFallback: true,
+            timeoutMs: 30_000,
+          });
+          return {
+            provider: ref.provider,
+            model: ref.model,
+            ok: result.ok === true,
+            latencyMs: Date.now() - started,
+            ...(result.ok === true ? { reply: result.text } : { error: result.message }),
+          };
+        };
+        const primary = await probe(sel);
+        const fallbackRef = readSettings(root).fallbackModel;
+        const hasFallback =
+          fallbackRef.provider !== '' &&
+          fallbackRef.model !== '' &&
+          !(fallbackRef.provider === sel.provider && fallbackRef.model === sel.model);
+        const fallback = hasFallback ? await probe(fallbackRef) : null;
+        const primaryOk = primary.ok === true;
+        const fallbackOk = fallback !== null && fallback.ok === true;
         return send(200, {
-          ok: result.ok === true,
+          ok: primaryOk || fallbackOk,
+          active: primaryOk ? 'primary' : fallbackOk ? 'fallback' : 'none',
           model: { provider: sel.provider, model: sel.model, source },
-          latencyMs: Date.now() - started,
-          ...(result.ok === true ? { reply: result.text } : { error: result.message }),
+          latencyMs: primary.latencyMs,
+          ...(primaryOk ? { reply: primary.reply } : { error: primary.error }),
+          primary,
+          ...(fallback === null ? {} : { fallback }),
         });
       }
 
