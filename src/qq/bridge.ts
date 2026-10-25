@@ -2330,7 +2330,7 @@ export class QqBridge {
       (policy.voiceChance > 0 || policy.requestedVoiceChance > 0 || mode === 'proactive')
     ) {
       const text = plan.messages.join('，');
-      const voiceOk = await this.speakInGroup(groupId, text, undefined, emotion);
+      const voiceOk = await this.speakInGroup(groupId, text, undefined, emotion, ownerAt);
       if (voiceOk) {
         this.appendAssistant(groupId, text, now);
         return 1;
@@ -2418,7 +2418,13 @@ export class QqBridge {
   }
 
   /** 在群里说一段话（语音） */
-  private async speakInGroup(groupId: string, text: string, quoteTo?: string, emotion?: string): Promise<boolean> {
+  private async speakInGroup(
+    groupId: string,
+    text: string,
+    quoteTo?: string,
+    emotion?: string,
+    prefix: ObSegment[] = [],
+  ): Promise<boolean> {
     const speaker = this.speaker;
     if (speaker === undefined) return false;
     const tts = this.config.tts;
@@ -2430,6 +2436,9 @@ export class QqBridge {
       provider: tts.provider,
       endpoint: tts.endpoint,
       style: tts.style.trim() !== '' ? tts.style : emotion !== undefined && emotion !== '' ? emotion : inferTtsStyle(text),
+      ...(tts.provider === 'gpt-sovits'
+        ? { pitchSemitones: tts.pitchSemitones, speed: tts.speed }
+        : {}),
     });
     if (!result.ok) {
       this.recordError(`语音合成失败：${describeFailure(result)}`);
@@ -2447,12 +2456,12 @@ export class QqBridge {
     let sent = await this.sendSegments(
       groupId,
       quoteTo === undefined
-        ? [{ type: 'record', data: { file: path } }]
-        : [{ type: 'reply', data: { id: quoteTo } }, { type: 'record', data: { file: path } }],
+        ? [...prefix, { type: 'record', data: { file: path } }]
+        : [...prefix, { type: 'reply', data: { id: quoteTo } }, { type: 'record', data: { file: path } }],
     );
     if (!sent.ok && quoteTo !== undefined) {
       this.log('warn', `带引用语音发送失败，改发不带引用：${sent.message}`);
-      sent = await this.sendSegments(groupId, [{ type: 'record', data: { file: path } }]);
+      sent = await this.sendSegments(groupId, [...prefix, { type: 'record', data: { file: path } }]);
     }
     if (!sent.ok) {
       this.log('warn', `语音发送失败（${sent.reason}）：${sent.message}`);
@@ -2656,7 +2665,8 @@ export class QqBridge {
     if (p.ownerMentionMaxPerDay > 0 && state.ownerMentionDay.count >= p.ownerMentionMaxPerDay) {
       return false;
     }
-    if (Math.random() >= p.ownerMentionChance) return false;
+    const guaranteed = p.ownerMentionGuarantee === true && state.ownerMentionDay.count === 0;
+    if (!guaranteed && Math.random() >= p.ownerMentionChance) return false;
     state.lastOwnerMentionAt = now;
     state.ownerMentionDay.count += 1;
     this.log('info', `群 ${state.groupId} 本次开口将 @主人（今日第 ${state.ownerMentionDay.count} 次）`);

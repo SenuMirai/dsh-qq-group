@@ -66,6 +66,8 @@ export interface ProactiveConfig {
   ownerMentionEnabled: boolean;
   /** 每次主动开口时选择 @主人的概率（0~1） */
   ownerMentionChance: number;
+  /** 每天第一次符合条件时保底 @ 一次（不受概率影响） */
+  ownerMentionGuarantee: boolean;
   /** 两次 @主人 的最小间隔（毫秒） */
   ownerMentionCooldownMs: number;
   /** 每天最多 @主人 几次（0 = 不限） */
@@ -241,6 +243,10 @@ export interface QqTtsConfig {
   endpoint: string;
   /** 情感/语气/风格描述（本地网关使用） */
   style: string;
+  /** GPT-SoVITS 音高偏移（半音，-6~6） */
+  pitchSemitones: number;
+  /** GPT-SoVITS 语速倍率（0.7~1.5） */
+  speed: number;
   /** 显式指定 Python 解释器；空 = 自动探测 */
   pythonPath: string;
   /** 语音缓存目录（空 = 用户目录下的 cache/tts） */
@@ -461,6 +467,7 @@ export function defaultGroupPolicy(): GroupPolicy {
       trial: true,
       ownerMentionEnabled: false,
       ownerMentionChance: 0.25,
+      ownerMentionGuarantee: true,
       ownerMentionCooldownMs: 45 * 60_000,
       ownerMentionMaxPerDay: 3,
     },
@@ -579,6 +586,8 @@ export function defaultConfig(): QqConfig {
       provider: 'edge',
       endpoint: 'http://127.0.0.1:50121',
       style: '',
+      pitchSemitones: 0,
+      speed: 1,
       pythonPath: '',
       cacheDir: '',
       serviceScript: '',
@@ -843,6 +852,7 @@ export function normalizeGroupPolicy(raw: unknown, path: string, base = defaultG
         pro.ownerMentionEnabled === undefined
           ? base.proactive.ownerMentionEnabled
           : pro.ownerMentionEnabled === true,
+      ownerMentionGuarantee: pro.ownerMentionGuarantee !== false,
       ownerMentionChance: num(
         pro.ownerMentionChance,
         `${path}.proactive.ownerMentionChance`,
@@ -1012,6 +1022,8 @@ export function normalizeConfig(raw: unknown): QqConfig {
       provider: enumOf(ttsSrc.provider, 'tts.provider', base.tts.provider, ['edge', 'gpt-sovits'] as const),
       endpoint: str(ttsSrc.endpoint, 'tts.endpoint', base.tts.endpoint),
       style: str(ttsSrc.style, 'tts.style', base.tts.style),
+      pitchSemitones: num(ttsSrc.pitchSemitones, 'tts.pitchSemitones', base.tts.pitchSemitones, -6, 6),
+      speed: num(ttsSrc.speed, 'tts.speed', base.tts.speed, 0.7, 1.5),
       pythonPath: str(ttsSrc.pythonPath, 'tts.pythonPath', base.tts.pythonPath),
       cacheDir: str(ttsSrc.cacheDir, 'tts.cacheDir', base.tts.cacheDir),
     serviceScript: str(ttsSrc.serviceScript, 'tts.serviceScript', base.tts.serviceScript),

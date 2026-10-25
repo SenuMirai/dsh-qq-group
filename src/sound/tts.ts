@@ -32,6 +32,10 @@ export interface SpeakOptions {
   endpoint?: string;
   /** 情感/语气/风格描述（本地网关使用） */
   style?: string;
+  /** GPT-SoVITS 音高偏移（半音） */
+  pitchSemitones?: number;
+  /** GPT-SoVITS 语速倍率 */
+  speed?: number;
   /** 跳过缓存（调试用） */
   noCache?: boolean;
 }
@@ -61,7 +65,7 @@ export const DEFAULT_CACHE_BYTES = 200 * 1024 * 1024;
 
 /** 缓存键：参数不同就是不同的音频，必须全进哈希 */
 export function cacheKey(text: string, options: SpeakOptions): string {
-  const material = [text, options.voice ?? '', options.rate ?? '', options.pitch ?? '', options.volume ?? '', options.provider ?? 'edge', options.style ?? ''].join('\u0001');
+  const material = [text, options.voice ?? '', options.rate ?? '', options.pitch ?? '', options.volume ?? '', options.provider ?? 'edge', options.style ?? '', String(options.pitchSemitones ?? ''), String(options.speed ?? '')].join('\u0001');
   return createHash('sha1').update(material, 'utf8').digest('hex');
 }
 
@@ -80,8 +84,23 @@ export function resolveFfmpeg(configured?: string): string | undefined {
  * @param input 音频字节
  * @param ffmpeg 可执行文件名或绝对路径
  */
-export async function decodeWithFfmpeg(input: Uint8Array, ffmpeg = 'ffmpeg'): Promise<{ ok: true; pcm: Pcm } | SpeakFailure> {
-  const wav = await runFfmpeg(input, ffmpeg, ['-f', 'wav', '-acodec', 'pcm_s16le', '-ar', '44100', '-ac', '2']);
+export async function decodeWithFfmpeg(
+  input: Uint8Array,
+  ffmpeg = 'ffmpeg',
+  filters: string[] = [],
+): Promise<{ ok: true; pcm: Pcm } | SpeakFailure> {
+  const args = [
+    ...(filters.length > 0 ? ['-af', filters.join(',')] : []),
+    '-f',
+    'wav',
+    '-acodec',
+    'pcm_s16le',
+    '-ar',
+    '44100',
+    '-ac',
+    '2',
+  ];
+  const wav = await runFfmpeg(input, ffmpeg, args);
   if (!wav.ok) return wav;
   const parsed = parseWave(wav.bytes);
   if (!parsed.ok) return { ok: false, reason: 'decode-failed', message: `ffmpeg 输出不是合法 WAV：${parsed.reason}` };
@@ -290,7 +309,15 @@ export class Speaker {
     if (!result.ok) return result;
     this.synthesized += 1;
 
-    const decoded = await decodeWithFfmpeg(result.audio, this.ffmpeg);
+    const filters: string[] = [];
+    const speed = Math.min(1.5, Math.max(0.7, options.speed ?? 1));
+    if (Math.abs(speed - 1) > 0.01) filters.push(`atempo=${speed.toFixed(3)}`);
+    const semitones = Math.min(6, Math.max(-6, options.pitchSemitones ?? 0));
+    if (Math.abs(semitones) > 0.01) {
+      const ratio = Math.pow(2, semitones / 12);
+      filters.push('aresample=44100', `asetrate=${Math.round(44100 * ratio)}`, 'aresample=44100', `atempo=${(1 / ratio).toFixed(4)}`);
+    }
+    const decoded = await decodeWithFfmpeg(result.audio, this.ffmpeg, filters);
     if (!decoded.ok) return decoded;
 
     // 落缓存（失败不影响本次结果）
