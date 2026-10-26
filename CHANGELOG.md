@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## 1.26.8 — 状态页直接显示 QQ 登录二维码
+
+- 运行状态页新增 QQ 登录二维码：连接不在线时直接显示 NapCat 写出的 `cache/qrcode.png`。
+- 二维码路径自动解析：优先 `DSH_NAPCAT_QR`，其次启动脚本里的 `cd /d "...\shell"`，最后常见 NapCat 安装位置。
+- 新增 `GET /dsh-qq-group/qr`：只读代理最新二维码 PNG，禁止缓存；`GET /qr/status` 返回是否可用和 mtime。
+- 离线时每 5 秒自动重载二维码；二维码更新后无需手动找路径。
+- 「刷新二维码」按钮立即重新拉取；若 NapCat 还没生成新码，可点「启动 NapCat」重新生成。
+- 不再需要复制 `C:\NapCatTest\shell\cache\qrcode.png` 到浏览器。
+
 ## 1.26.7 — 每日保底可自定义 + 滑条保存
 
 - 「每天至少 @ 一次」改为可填数字的「每日保底」：0~50 次/天。

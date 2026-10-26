@@ -673,6 +673,36 @@ function permanentPromote(
   return item;
 }
 
+/** 找 NapCat 登录二维码：优先环境变量，其次启动脚本里的 cd 目录，最后常见安装位置。 */
+function resolveNapcatQr(root: string): string | undefined {
+  const candidates: string[] = [];
+  const env = process.env.DSH_NAPCAT_QR;
+  if (env !== undefined && env.trim() !== '') candidates.push(env.trim());
+  try {
+    const launcher = readSettings(root).napcatLauncher;
+    if (launcher !== '') {
+      const text = readFileSync(launcher, 'utf8');
+      const match = /cd\s+\/d\s+"([^"]+)"/i.exec(text);
+      if (match?.[1] !== undefined) candidates.push(join(match[1], 'cache', 'qrcode.png'));
+    }
+  } catch {
+    /* 启动脚本不存在时继续试默认路径 */
+  }
+  candidates.push(join('C:\\NapCatTest\\shell\\cache', 'qrcode.png'));
+  candidates.push(join(homedir(), 'NapCat', 'shell', 'cache', 'qrcode.png'));
+  let best: { path: string; mtime: number } | undefined;
+  for (const path of candidates) {
+    try {
+      if (!existsSync(path)) continue;
+      const mtime = statSync(path).mtimeMs;
+      if (best === undefined || mtime > best.mtime) best = { path, mtime };
+    } catch {
+      /* 单个候选读不到不影响其它 */
+    }
+  }
+  return best?.path;
+}
+
 /** 发布前清洗：去掉链接、QQ号/群号这类长数字，避免隐私外泄。 */
 function sanitizeQzone(text: string): string {
   return text
@@ -1468,6 +1498,40 @@ export function apply(ctx: any): void {
           startedAt: PLUGIN_STARTED_AT,
           pid: process.pid,
         });
+      }
+
+      if (rest === 'qr' && method === 'GET') {
+        const path = resolveNapcatQr(root);
+        if (path === undefined) {
+          return send(404, { ok: false, message: '还没有生成登录二维码；先启动 NapCat，等它写出二维码后再刷新' });
+        }
+        try {
+          const image = readFileSync(path);
+          if (image.length < 100 || image[0] !== 0x89 || image[1] !== 0x50) {
+            return send(404, { ok: false, message: '二维码文件还不是有效 PNG，请稍后刷新' });
+          }
+          res.writeHead(200, {
+            'content-type': 'image/png',
+            'cache-control': 'no-store, no-cache, must-revalidate',
+            'content-length': String(image.length),
+            'x-qr-mtime': String(statSync(path).mtimeMs),
+          });
+          res.end(image);
+          return;
+        } catch (e) {
+          return send(404, { ok: false, message: e instanceof Error ? e.message : String(e) });
+        }
+      }
+
+      if (rest === 'qr/status' && method === 'GET') {
+        const path = resolveNapcatQr(root);
+        if (path === undefined) return send(200, { ok: true, available: false });
+        try {
+          const stat = statSync(path);
+          return send(200, { ok: true, available: true, mtime: stat.mtimeMs, bytes: stat.size });
+        } catch {
+          return send(200, { ok: true, available: false });
+        }
       }
 
       if (rest === 'tts-health' && method === 'GET') {
