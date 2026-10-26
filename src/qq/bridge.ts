@@ -2639,6 +2639,43 @@ export class QqBridge {
     return client.sendPrivateMsg(userId, segments);
   }
 
+  /** 拉群名、好友昵称/备注，给设置页会话列表显示。 */
+  async sessionNames(): Promise<{
+    ok: boolean;
+    groups: Record<string, string>;
+    privates: Record<string, string>;
+    message?: string;
+  }> {
+    const client = this.client;
+    if (client === undefined) return { ok: false, groups: {}, privates: {}, message: 'QQ 连接未建立' };
+    const groups: Record<string, string> = {};
+    const privates: Record<string, string> = {};
+    try {
+      const response = await client.call('get_group_list');
+      if (response.status === 'ok' && Array.isArray(response.data)) {
+        for (const raw of response.data) {
+          const item = raw as { group_id?: unknown; group_name?: unknown };
+          const id = asId(item.group_id);
+          const name = typeof item.group_name === 'string' ? item.group_name.trim() : '';
+          if (id !== '' && name !== '') groups[id] = name;
+        }
+      }
+      const friends = await client.call('get_friend_list');
+      if (friends.status === 'ok' && Array.isArray(friends.data)) {
+        for (const raw of friends.data) {
+          const item = raw as { user_id?: unknown; nickname?: unknown; remark?: unknown };
+          const id = asId(item.user_id);
+          const remark = typeof item.remark === 'string' ? item.remark.trim() : '';
+          const nickname = typeof item.nickname === 'string' ? item.nickname.trim() : '';
+          if (id !== '' && (remark !== '' || nickname !== '')) privates[id] = remark || nickname;
+        }
+      }
+      return { ok: true, groups, privates };
+    } catch (e) {
+      return { ok: false, groups, privates, message: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
   /**
    * 拉机器人所在的群列表（`get_group_list`）。
    *

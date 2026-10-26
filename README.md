@@ -1,6 +1,6 @@
 # dsh-qq-group
 
-> 当前版本：**v1.26.9**（QQ空间配图/@/远程读取、红包、主动 @主人、七角色语音）
+> 当前版本：**v1.27.0**（QQ空间配图/@/远程读取、红包、主动 @主人、七角色语音）
 
 独立的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) QQ 群聊插件：有人设、有记忆、会判断该不该接话，支持主动/被动搭话、语音、唱歌、表情包、日记、QQ空间说说和视觉看图。
 
@@ -54,6 +54,7 @@ A standalone QQ group-chat plugin for [DeepSeek Harness](https://github.com/deep
 - 支持 HTTP 上报地址，方便 NapCat 反向上报。
 - 连接状态、群列表、已添加会话、最近错误都在「运行状态」页。
 - 离线时运行状态页直接显示 NapCat 登录二维码，每 5 秒自动重载；过期可点「刷新二维码」或「启动 NapCat」。
+- QQ 在线时自动拉取群名、好友昵称/备注；设置页会话列表不再只能看号码。
 
 #### 2. 人设卡与模型
 

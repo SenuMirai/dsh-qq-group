@@ -1534,6 +1534,10 @@ export function apply(ctx: any): void {
         }
       }
 
+      if (rest === 'session-names' && method === 'GET') {
+        return send(200, await qqHost.sessionNames());
+      }
+
       if (rest === 'tts-health' && method === 'GET') {
         const cfg = readQqConfig(qqConfigPath(root)).config;
         const endpoint = cfg.tts.endpoint.trim().replace(/\/+$/, '');

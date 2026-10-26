@@ -76,6 +76,13 @@ export interface QqHost {
   ): Promise<Record<string, unknown>>;
   /** 心情：按群读取/重置 */
   mood(groupId: string, action: 'get' | 'reset'): Promise<Record<string, unknown>>;
+  /** 群名/私聊昵称（NapCat 在线时） */
+  sessionNames(): Promise<{
+    ok: boolean;
+    groups: Record<string, string>;
+    privates: Record<string, string>;
+    message?: string;
+  }>;
   /** QQ空间：发布/删除/可用性 */
   qzone(
     action: 'publish' | 'delete' | 'available' | 'cookies',
@@ -245,6 +252,17 @@ export function createQqHost(deps: QqHostDeps): QqHost {
   return {
     get running(): boolean {
       return bridge !== undefined;
+    },
+
+    /** 群名/私聊昵称（NapCat 在线时） */
+    async sessionNames(): Promise<{
+      ok: boolean;
+      groups: Record<string, string>;
+      privates: Record<string, string>;
+      message?: string;
+    }> {
+      if (bridge === undefined) return { ok: false, groups: {}, privates: {}, message: 'QQ 连接尚未启动' };
+      return bridge.sessionNames();
     },
 
     /** 记忆面板的读/写/压缩（桥未启动时明确失败） */
