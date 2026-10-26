@@ -972,6 +972,27 @@ export class QqBridge {
     };
 
     const now = Date.now();
+    if (
+      this.deps.permanent !== undefined &&
+      this.deps.permanent.enabled() &&
+      this.deps.permanent.autoCapture() &&
+      message.text.trim() !== '' &&
+      !message.text.trim().startsWith('/')
+    ) {
+      const added = this.deps.permanent.add(sessionKey, {
+        text: `${name}：${message.text}`,
+        people: [userId],
+        source: 'auto',
+        scope: isOwner ? 'global' : 'session',
+        sensitivity: isOwner ? 'private' : 'normal',
+        mergeWithinMs: 10 * 60_000,
+      });
+      if (added.ok) {
+        this.log('debug', `私聊 ${userId} 写入永久记忆（${isOwner ? '全局私密' : '会话'}，${added.merged ? '合并' : '新增'}）`);
+      } else if (added.reason === 'full') {
+        this.log('warn', `私聊 ${userId} 永久记忆已满（${added.capacity} 条），自动记录暂停`);
+      }
+    }
     const state = this.stateOf(sessionKey);
     const stat = this.statOf(sessionKey);
     stat.received += 1;
@@ -1100,7 +1121,9 @@ export class QqBridge {
         sensitivity: scope === 'global' ? 'private' : 'normal',
         mergeWithinMs: 10 * 60_000,
       });
-      if (!added.ok && added.reason === 'full' && !this.permanentFullNotified.has(groupId)) {
+      if (added.ok) {
+        this.log('debug', `群 ${groupId} 写入永久记忆（${scope}，${added.merged ? '合并' : '新增'}）`);
+      } else if (added.reason === 'full' && !this.permanentFullNotified.has(groupId)) {
         this.permanentFullNotified.add(groupId);
         this.log('warn', `群 ${groupId} 永久记忆已满（${added.capacity} 条），已停止自动记录，等待手动清理`);
       }

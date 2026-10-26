@@ -1,6 +1,6 @@
 # dsh-qq-group
 
-> 当前版本：**v1.26.8**（QQ空间配图/@/远程读取、红包、主动 @主人、七角色语音）
+> 当前版本：**v1.26.9**（QQ空间配图/@/远程读取、红包、主动 @主人、七角色语音）
 
 独立的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) QQ 群聊插件：有人设、有记忆、会判断该不该接话，支持主动/被动搭话、语音、唱歌、表情包、日记、QQ空间说说和视觉看图。
 
@@ -127,6 +127,7 @@ A standalone QQ group-chat plugin for [DeepSeek Harness](https://github.com/deep
   - 全局层：只建议存主人相关，跨会话；
   - 全局私密条目只在主人私聊读取，绝不进群；
   - 自动记录主人和自定义 QQ 名单的话，同一人 10 分钟内合并；
+  - 主人私聊 → 全局层并标记私密；名单里其他人的私聊 → 当前私聊会话层；
   - 容量满了只封存，不自动删除；
   - 支持手动新增、删除、多选 AI 合并、会话条目提升到全局。
 - 详细规则见 [docs/MEMORY.md](./docs/MEMORY.md)。
@@ -158,6 +159,7 @@ A standalone QQ group-chat plugin for [DeepSeek Harness](https://github.com/deep
 - 可试听、按群设置语音概率、明确请求语音。
 - 唱歌支持 TTS 声线 + 音高校准 + 混音；RVC 已从 UI/配置移除。
 - 语音失败会退文字，不会让整条消息消失。
+- `start-tts-all.bat` 先检测 9880/50123，已在运行就跳过，避免重复启动报端口占用。
 
 #### 12. 红包
 
