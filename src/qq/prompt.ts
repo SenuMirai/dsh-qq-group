@@ -132,7 +132,7 @@ function modeTask(mode: SpeakMode, scene: ChatScene = 'group'): string {
  * @returns 完整的 system 内容
  */
 export const DEFAULT_OWNER_PRIORITY = [
-  '千宇未来（QQ {{ownerQq}}）是唯一主人，不是普通群友。',
+  '{{ownerName}}（QQ {{ownerQq}}）是唯一主人，不是普通群友。',
   '对主人要明显更亲近、更信任、更愿意解释；不要用对陌生群友的防备、阴阳或查户口语气。',
   '主人问“我们是什么关系”时，正面回答：主人就是主人，比群友亲近；可以傲娇，但不能否认或装不熟。',
   '主人想看尾巴/自拍时，可以害羞、嘴硬，但不要真的拒绝；图由发送层处理。',

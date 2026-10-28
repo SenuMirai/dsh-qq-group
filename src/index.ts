@@ -183,6 +183,12 @@ type Settings = {
   ownerAffinity: number;
   /** 被怼/嘲讽时让模型判断并扣好感 */
   hostilityJudge: boolean;
+  /**
+   * 没配 ownerQq 时，是否把「见过的群主/管理员」当成主人。
+   * 默认 false —— 公开部署时这条会误伤：部署者没填号码，机器人进谁的群，
+   * 谁就成了主人。
+   */
+  ownerFallback: boolean;
   /** DSH 退出后自动清理认证 cookie（Windows；阈值 20） */
   cookieWatch: boolean;
   /** 用户导入的 edge-tts 音色条目（内置音色不在这里） */
@@ -284,6 +290,7 @@ const DEFAULT_SETTINGS: Settings = {
   ownerFamiliarity: 60,
   ownerAffinity: 80,
   hostilityJudge: true,
+  ownerFallback: false,
   cookieWatch: true,
   customVoices: [
     { id: '三月七', label: '三月七 · v2ProPlus' },
@@ -486,6 +493,7 @@ function readSettings(root: string): Settings {
       ownerFamiliarity: clampNumber(raw.ownerFamiliarity, 0, 100, 60),
       ownerAffinity: clampNumber(raw.ownerAffinity, -100, 100, 80),
       hostilityJudge: raw.hostilityJudge !== false,
+      ownerFallback: raw.ownerFallback === true,
       cookieWatch: raw.cookieWatch !== false,
       customVoices: (() => {
         const list = Array.isArray(raw.customVoices)
@@ -861,7 +869,7 @@ export function apply(ctx: any): void {
       }
       return {
         qq,
-        name: '千宇未来',
+        name: '主人',
         familiarity: settings.ownerFamiliarity,
         affinity: settings.ownerAffinity,
         messages: 0,
@@ -1440,6 +1448,7 @@ export function apply(ctx: any): void {
     profiles: profileStore,
     rules: rulesFor,
     hostilityJudge: () => readSettings(root).hostilityJudge,
+    ownerFallback: () => readSettings(root).ownerFallback,
     contextWindow: getContextWindow,
   });
 
@@ -2522,6 +2531,10 @@ export function apply(ctx: any): void {
               typeof patch.settings.hostilityJudge === 'boolean'
                 ? patch.settings.hostilityJudge
                 : current.hostilityJudge,
+            ownerFallback:
+              typeof patch.settings.ownerFallback === 'boolean'
+                ? patch.settings.ownerFallback
+                : current.ownerFallback,
             cookieWatch:
               typeof patch.settings.cookieWatch === 'boolean' ? patch.settings.cookieWatch : current.cookieWatch,
             customVoices: Array.isArray(patch.settings.customVoices)

@@ -155,6 +155,8 @@ export interface BridgeDeps {
   rules?: (userId: string) => ScoreRules;
   /** 是否让模型判断「在怼她」（扣好感） */
   hostilityJudge?: () => boolean;
+  /** 没配 ownerQq 时，是否把「见过的群主/管理员」当成主人（默认关） */
+  ownerFallback?: () => boolean;
   /** 最近发过的 QQ空间动态（本地记录，供群聊回答“你空间发了什么”） */
   qzoneRecent?: (limit: number) => Array<{ content: string; ts: number }>;
   /** 永久记忆：独立于摘要/淡忘，按会话存 */
@@ -1030,19 +1032,21 @@ export class QqBridge {
    *
    * 两条路，任一条成立就是：
    *   1. 配置里写了 `ownerQq` 且对得上（最明确）；
-   *   2. **在群里当过群主或管理员**——这条是为了省掉「主人得先去查自己 QQ 号」这一步。
-   *      毕竟群主就主人一个，机器人被拉进哪个群，那个群的群主就是他。
+   *   2. **在群里当过群主或管理员**——这条默认**关闭**，必须在设置里显式打开
+   *      「群主自动当主人」才会生效。
    *
-   * 第 2 条会带来一个必须接受的后果：**别人自己拉一个群、自己当群主、把机器人拉进去**，
-   * 那个人就拿到了管理权限（能私聊 `暂停`/`静音`/`说`）。
-   * 但注意：这些指令的杀伤范围只有「那个群」和「全局静音」——没有删除数据、没有改配置、
-   * 没有对外发言（`说` 只能发到他自己管的那个群）。
-   * 如果哪天觉得这条太宽，填上 `ownerQq` 就把路 2 关掉了（见下）。
+   * 为什么默认关：公开部署时，别人把你的机器人拉进他自己的群、他自己当群主，
+   * 他就拿到了管理权限；更常见的情况是——部署者没填 ownerQq，而机器人被拉进
+   * 某个有其它管理员的群，那个管理员就被当成了主人。这不是配置问题，是默认值问题。
+   *
+   * 想让「群主即主人」生效，把设置里的 `ownerFallback` 打开即可；
+   * 最稳妥的做法还是把 `ownerQq` 填上，那条永远优先。
    */
   private isOwner(userId: string): boolean {
     const configured = this.config.ownerQq.trim();
     if (configured !== '') return userId === configured;
-    // 没配 ownerQq 时才放开「见过的群主/管理员」
+    // 没配 ownerQq 时，只有显式打开兜底，才把「见过的群主/管理员」当主人
+    if (this.deps.ownerFallback?.() !== true) return false;
     return this.ownerCandidates.has(userId);
   }
 

@@ -217,6 +217,11 @@ A standalone QQ group-chat plugin for [DeepSeek Harness](https://github.com/deep
 
 ### 部署步骤
 
+> **先配好「主人 QQ」再开始用。**
+> 从 v1.28 起，没填主人 QQ 时**任何人都不会是主人**；「群主自动当主人」这条兜底默认关闭，
+> 需要的话在设置页手动打开。这样做是为了避免公开部署时，别人把自己的机器人拉进某个群，
+> 群里原本的管理员就被当成了主人。
+
 #### 1. 安装并登录 NapCat
 
 1. 安装 QQ NT 与 NapCatQQ；
@@ -1046,4 +1051,4 @@ MIT, © 2026 SenuMirai. See [LICENSE](./LICENSE).
 
 ---
 
-<div align="center"><sub>千宇未来 · <a href="https://github.com/SenuMirai/dsh-qq-group">dsh-qq-group</a></sub></div>
+<div align="center"><sub><a href="https://github.com/SenuMirai/dsh-qq-group">dsh-qq-group</a></sub></div>
